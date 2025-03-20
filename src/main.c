@@ -1,14 +1,20 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <regex.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+int socketFD;
+
 const char* htmlHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n";
-#define HTML_HEADER_STRING_LEN strlen(htmlHeaderString)
+const char* pngHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/png\n\n";
+const char* jpgHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/jpeg\n\n";
+const char* cssHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/css\n\n";
+const char* jsHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n";
 
 regex_t getRegex;
 
@@ -25,21 +31,67 @@ void freeRegex() { regfree(&getRegex); }
 
 void get(int fd, char* data, size_t length)
 {
-    if (length == 1 && !strncmp(data, "/", length)) {
-        printf("Index");
-        FILE* file = fopen("resources/index.html", "r");
-        if (file == NULL) {
-            fprintf(stderr, "Failed to open file: index.html");
-            return;
+    if (data[0] == '/') {
+        FILE* file;
+
+        const char** header;
+
+        if (!strncmp(data, "/", length)) {
+            file = fopen("resources/index.html", "r");
+
+            if (file == NULL) {
+                fprintf(stderr, "Failed to open file: resources/index.html\n");
+                return;
+            }
+
+            header = &htmlHeaderString;
+        } else {
+            char buf[500];
+            sprintf(buf, "resources/%.*s", (int)length - 1, data + 1);
+
+            if (file == NULL) {
+                fprintf(stderr, "Failed to open file: %s\n", buf);
+                return;
+            }
+
+            switch (data[length - 1]) {
+            case 'l': // HTML
+                header = &htmlHeaderString;
+                file = fopen(buf, "r");
+                break;
+            case 'g': // JPG, PNG
+                switch (data[length - 2]) {
+                case 'n': // PNG
+                    header = &pngHeaderString;
+                    break;
+                case 'p': // JPG
+                    header = &jpgHeaderString;
+                    break;
+                }
+                file = fopen(buf, "rb");
+                break;
+            case 's': // CSS, JS
+                switch (data[length - 2]) {
+                case 's': // CSS
+                    header = &cssHeaderString;
+                    break;
+                case 'j': // JS
+                    header = &jsHeaderString;
+                    break;
+                }
+                file = fopen(buf, "r");
+                break;
+            }
         }
+
         fseek(file, 0, SEEK_END);
 
-        size_t length = ftell(file) + HTML_HEADER_STRING_LEN;
+        size_t length = ftell(file) + strlen(*header);
         fseek(file, 0, SEEK_SET);
 
         char* buf = malloc(length * sizeof(char) + 1);
-        memcpy(buf, htmlHeaderString, HTML_HEADER_STRING_LEN);
-        fread(buf + HTML_HEADER_STRING_LEN, 1, length - HTML_HEADER_STRING_LEN, file);
+        memcpy(buf, *header, strlen(*header));
+        fread(buf + strlen(*header), 1, length - strlen(*header), file);
         buf[length] = 0;
 
         printf("Reply:\n===========\n%.*s==========\n", (int)length, buf);
@@ -47,8 +99,6 @@ void get(int fd, char* data, size_t length)
 
         free(buf);
     }
-
-    printf("Unknown request: %.*s\n", (int)length, data);
 }
 
 void parse_buf(int fd, char* data, size_t length)
@@ -70,9 +120,27 @@ void parse_buf(int fd, char* data, size_t length)
     free(match);
 }
 
+void cleanup()
+{
+    close(socketFD);
+
+    printf("Closed socket\n");
+
+    freeRegex();
+}
+
+void handler(int v)
+{
+    printf("\n\nENDING\n");
+    cleanup();
+    exit(-2);
+}
+
 int main(int argc, char** argv)
-{ //
-    int socketFD = socket(AF_INET, SOCK_STREAM, 0);
+{
+    signal(SIGINT, handler);
+
+    socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (!socketFD) {
         fprintf(stderr, "Failed to create socket\n");
         exit(-1);
@@ -81,7 +149,7 @@ int main(int argc, char** argv)
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8082),
+        .sin_port = htons(8080),
         .sin_addr = { .s_addr = inet_addr("127.0.0.1"), },
     };
 
@@ -98,7 +166,9 @@ int main(int argc, char** argv)
         socklen_t clientAddrSize = 0;
         if (listen(socketFD, 50) == -1) {
             fprintf(stderr, "Failed to listen\n");
-            goto cleanup;
+
+            cleanup();
+            exit(-1);
         }
 
         int clientSocket = accept(socketFD, (struct sockaddr*)&clientAddr, &clientAddrSize);
@@ -133,11 +203,8 @@ int main(int argc, char** argv)
         parse_buf(clientSocket, buf, totalRead);
 
         close(clientSocket);
+        printf("Closed socket\n");
     }
 
-cleanup:
-    close(socketFD);
-    printf("Closed socket\n");
-
-    freeRegex();
+    cleanup();
 }

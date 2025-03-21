@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <errno.h>
+#include <pthread.h>
 #include <regex.h>
 #include <signal.h>
 #include <stdio.h>
@@ -10,10 +11,11 @@
 
 int socketFD;
 
-const char* errorString = "HTTP/1.1 404 OK\n";
+const char* errorString = "HTTP/1.1 404 Not Found\n";
 const char* htmlHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n";
 const char* pngHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/png\n\n";
 const char* jpgHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/jpeg\n\n";
+const char* svgHeaderString = "HTTP/1.1 200 OK\nContent-Type: image/svg+xml\n\n";
 const char* cssHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/css\n\n";
 const char* jsHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n";
 
@@ -32,87 +34,93 @@ void setup_regex()
 
 void free_regex() { regfree(&getRegex); }
 
+void send_file(int fd, char* data, size_t length)
+{
+    FILE* file;
+
+    const char** header;
+
+    char fileBuf[500];
+    if (!strncmp(data, "/", length)) {
+        sprintf(fileBuf, "%s/index.html", sourceLoc);
+        file = fopen(fileBuf, "r");
+
+        if (file == NULL) {
+            fprintf(stderr, "Failed to open file: resources/index.html\n");
+            return;
+        }
+
+        header = &htmlHeaderString;
+    } else {
+        sprintf(fileBuf, "%s/%.*s", sourceLoc, (int)length - 1, data + 1);
+
+        switch (data[length - 1]) {
+        case 'l': // HTML
+            header = &htmlHeaderString;
+            file = fopen(fileBuf, "r");
+            break;
+        case 'g': // JPG, PNG
+            switch (data[length - 2]) {
+            case 'n': // PNG
+                header = &pngHeaderString;
+                break;
+            case 'p': // JPG
+                header = &jpgHeaderString;
+                break;
+            case 'v': // SVG
+                header = &svgHeaderString;
+                break;
+            }
+            file = fopen(fileBuf, "rb");
+            break;
+        case 's': // CSS, JS, TS
+            switch (data[length - 2]) {
+            case 's': // CSS
+                header = &cssHeaderString;
+                break;
+            case 'j': // JS
+            case 't': // TS
+                header = &jsHeaderString;
+                break;
+            }
+            file = fopen(fileBuf, "r");
+            break;
+        default:
+            fprintf(stderr, "Unkonwn file: %.*s\n", (int)length, data);
+            write(fd, errorString, strlen(errorString));
+            return;
+        }
+    }
+
+    if (file == NULL) {
+        printf("File doesnt exist: %.*s\n", (int)length, data);
+        printf("Reply:\n===========\n%.*s==========\n", (int)strlen(errorString), errorString);
+        write(fd, errorString, strlen(errorString));
+        return;
+    }
+
+    printf("GET %s\n", fileBuf);
+
+    fseek(file, 0, SEEK_END);
+
+    size_t totalLength = ftell(file) + strlen(*header);
+    fseek(file, 0, SEEK_SET);
+
+    char* buf = malloc(totalLength * sizeof(char) + 1);
+    memcpy(buf, *header, strlen(*header));
+    fread(buf + strlen(*header), 1, totalLength - strlen(*header), file);
+    buf[totalLength] = 0;
+
+    printf("Reply:\n===========\n%.*s==========\n", (int)totalLength, buf);
+    write(fd, buf, totalLength);
+
+    free(buf);
+}
+
 void handle_get(int fd, char* data, size_t length)
 {
     if (data[0] == '/') {
-        FILE* file;
-
-        const char** header;
-
-        char fileBuf[500];
-        if (!strncmp(data, "/", length)) {
-            sprintf(fileBuf, "%s/index.html", sourceLoc);
-            file = fopen(fileBuf, "r");
-
-            if (file == NULL) {
-                fprintf(stderr, "Failed to open file: resources/index.html\n");
-                return;
-            }
-
-            header = &htmlHeaderString;
-        } else {
-            sprintf(fileBuf, "%s/%.*s", sourceLoc, (int)length - 1, data + 1);
-
-#define HANDLE_FILE(arg)                                                                           \
-    do {                                                                                           \
-        file = fopen(fileBuf, (arg));                                                              \
-        if ((file) == NULL) {                                                                      \
-            fprintf(stderr, "Failed to open file: %s\n", fileBuf);                                 \
-            return;                                                                                \
-        }                                                                                          \
-    } while (0)
-
-            switch (data[length - 1]) {
-            case 'l': // HTML
-                header = &htmlHeaderString;
-                HANDLE_FILE("r");
-                break;
-            case 'g': // JPG, PNG
-                switch (data[length - 2]) {
-                case 'n': // PNG
-                    header = &pngHeaderString;
-                    break;
-                case 'p': // JPG
-                    header = &jpgHeaderString;
-                    break;
-                }
-                HANDLE_FILE("rb");
-                break;
-            case 's': // CSS, JS
-                switch (data[length - 2]) {
-                case 's': // CSS
-                    header = &cssHeaderString;
-                    break;
-                case 'j': // JS
-                    header = &jsHeaderString;
-                    break;
-                }
-                HANDLE_FILE("r");
-                break;
-            default:
-                write(fd, errorString, strlen(errorString));
-                return;
-            }
-
-#undef HANDLE_FILE
-        }
-
-        printf("GET %s\n", fileBuf);
-
-        fseek(file, 0, SEEK_END);
-
-        size_t length = ftell(file) + strlen(*header);
-        fseek(file, 0, SEEK_SET);
-
-        char* buf = malloc(length * sizeof(char) + 1);
-        memcpy(buf, *header, strlen(*header));
-        fread(buf + strlen(*header), 1, length - strlen(*header), file);
-        buf[length] = 0;
-
-        printf("Reply:\n===========\n%.*s==========\n", (int)length, buf);
-        write(fd, buf, length);
-
-        free(buf);
+        send_file(fd, data, length);
     }
 }
 

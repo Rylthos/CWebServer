@@ -10,6 +10,7 @@
 
 int socketFD;
 
+const char* errorString = "HTTP/1.1 404 OK\n";
 const char* htmlHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n";
 const char* pngHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/png\n\n";
 const char* jpgHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/jpeg\n\n";
@@ -18,7 +19,9 @@ const char* jsHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n
 
 regex_t getRegex;
 
-void setupRegex()
+char* sourceLoc;
+
+void setup_regex()
 {
     int retV
         = regcomp(&getRegex, "GET \\([[:alnum:][:punct:]]*\\) HTTP/[[:digit:]].[[:digit:]]", 0);
@@ -27,17 +30,19 @@ void setupRegex()
     }
 }
 
-void freeRegex() { regfree(&getRegex); }
+void free_regex() { regfree(&getRegex); }
 
-void get(int fd, char* data, size_t length)
+void handle_get(int fd, char* data, size_t length)
 {
     if (data[0] == '/') {
         FILE* file;
 
         const char** header;
 
+        char fileBuf[500];
         if (!strncmp(data, "/", length)) {
-            file = fopen("resources/index.html", "r");
+            sprintf(fileBuf, "%s/index.html", sourceLoc);
+            file = fopen(fileBuf, "r");
 
             if (file == NULL) {
                 fprintf(stderr, "Failed to open file: resources/index.html\n");
@@ -46,18 +51,21 @@ void get(int fd, char* data, size_t length)
 
             header = &htmlHeaderString;
         } else {
-            char buf[500];
-            sprintf(buf, "resources/%.*s", (int)length - 1, data + 1);
+            sprintf(fileBuf, "%s/%.*s", sourceLoc, (int)length - 1, data + 1);
 
-            if (file == NULL) {
-                fprintf(stderr, "Failed to open file: %s\n", buf);
-                return;
-            }
+#define HANDLE_FILE(arg)                                                                           \
+    do {                                                                                           \
+        file = fopen(fileBuf, (arg));                                                              \
+        if ((file) == NULL) {                                                                      \
+            fprintf(stderr, "Failed to open file: %s\n", fileBuf);                                 \
+            return;                                                                                \
+        }                                                                                          \
+    } while (0)
 
             switch (data[length - 1]) {
             case 'l': // HTML
                 header = &htmlHeaderString;
-                file = fopen(buf, "r");
+                HANDLE_FILE("r");
                 break;
             case 'g': // JPG, PNG
                 switch (data[length - 2]) {
@@ -68,7 +76,7 @@ void get(int fd, char* data, size_t length)
                     header = &jpgHeaderString;
                     break;
                 }
-                file = fopen(buf, "rb");
+                HANDLE_FILE("rb");
                 break;
             case 's': // CSS, JS
                 switch (data[length - 2]) {
@@ -79,10 +87,17 @@ void get(int fd, char* data, size_t length)
                     header = &jsHeaderString;
                     break;
                 }
-                file = fopen(buf, "r");
+                HANDLE_FILE("r");
                 break;
+            default:
+                write(fd, errorString, strlen(errorString));
+                return;
             }
+
+#undef HANDLE_FILE
         }
+
+        printf("GET %s\n", fileBuf);
 
         fseek(file, 0, SEEK_END);
 
@@ -107,14 +122,10 @@ void parse_buf(int fd, char* data, size_t length)
 
     regmatch_t* match = malloc((getRegex.re_nsub + 1) * sizeof(regmatch_t));
     int retV = regexec(&getRegex, data, getRegex.re_nsub + 1, match, 0);
-    if (!retV) { // GET Request
-        printf("%d->%d: %.*s\n", match[0].rm_so, match[0].rm_eo, match[0].rm_eo - match[0].rm_so,
-            data + match[0].rm_so);
+    if (!retV) { // handle get Request
+        printf("GET %.*s\n", match[1].rm_eo - match[1].rm_so, data + match[1].rm_so);
 
-        printf("%d->%d: %.*s\n", match[1].rm_so, match[1].rm_eo, match[1].rm_eo - match[1].rm_so,
-            data + match[1].rm_so);
-
-        get(fd, data + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
+        handle_get(fd, data + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
     }
 
     free(match);
@@ -126,7 +137,7 @@ void cleanup()
 
     printf("Closed socket\n");
 
-    freeRegex();
+    free_regex();
 }
 
 void handler(int v)
@@ -140,26 +151,39 @@ int main(int argc, char** argv)
 {
     signal(SIGINT, handler);
 
+    if (argc != 4) {
+        printf("Incorrect Usage: web <addr> <port> <file>\n");
+        return -1;
+    }
+
+    const char* addrLoc = argv[1];
+    int port = atoi(argv[2]);
+    sourceLoc = argv[3];
+
     socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (!socketFD) {
-        fprintf(stderr, "Failed to create socket\n");
+        fprintf(stderr, "Failed to create socket: %s\n", strerror(errno));
         exit(-1);
     }
     printf("Started socket\n");
 
     struct sockaddr_in addr = {
         .sin_family = AF_INET,
-        .sin_port = htons(8080),
-        .sin_addr = { .s_addr = inet_addr("127.0.0.1"), },
+        .sin_port = htons(port),
+        .sin_addr = { .s_addr = inet_addr(addrLoc), },
     };
 
     if (bind(socketFD, (struct sockaddr*)&addr, sizeof(addr))) {
-        fprintf(stderr, "Failed to bind socket: %d\n", errno);
+        fprintf(stderr, "Failed to bind socket: %s\n", strerror(errno));
         exit(-1);
     };
-    printf("Bound socket\n");
+    printf("Bound socket at %s:%d\n", addrLoc, port);
 
-    setupRegex();
+    setup_regex();
+
+    size_t readBufLength = 500;
+    char* readBuf = malloc(readBufLength + 1);
+    readBuf[readBufLength] = 0;
 
     while (1) {
         struct sockaddr_in clientAddr;
@@ -178,29 +202,26 @@ int main(int argc, char** argv)
         }
         printf("Connected\n");
 
-        size_t bufLength = 500;
-        char* buf = malloc(bufLength + 1);
-        buf[bufLength] = 0;
-        ssize_t msgLength = 0;
         size_t totalRead = 0;
+        ssize_t msgLength = 0;
 
         do {
-            if (msgLength == bufLength) {
-                size_t newLength = bufLength * 2;
+            if (msgLength == readBufLength) {
+                size_t newLength = readBufLength * 2;
                 char* newData = malloc(newLength + 1);
-                memcpy(newData, buf, bufLength);
-                bufLength = newLength;
-                free(buf);
-                buf = newData;
-                buf[newLength] = 0;
+                memcpy(newData, readBuf, readBufLength);
+                readBufLength = newLength;
+                free(readBuf);
+                readBuf = newData;
+                readBuf[newLength] = 0;
             }
 
-            msgLength
-                = recv(clientSocket, buf + totalRead, (bufLength - totalRead) * sizeof(char), 0);
+            msgLength = recv(
+                clientSocket, readBuf + totalRead, (readBufLength - totalRead) * sizeof(char), 0);
             totalRead += msgLength;
-        } while (msgLength == bufLength);
+        } while (msgLength == readBufLength);
 
-        parse_buf(clientSocket, buf, totalRead);
+        parse_buf(clientSocket, readBuf, totalRead);
 
         close(clientSocket);
         printf("Closed socket\n");

@@ -1,5 +1,6 @@
 #include "response.h"
 #include "log.h"
+#include "protocols.h"
 
 #include <netinet/in.h>
 #include <regex.h>
@@ -99,7 +100,17 @@ void send_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
 
   LOG_SEND("%.*s", (int)msgLength, msg);
 
-  sendto(sendFD, msg, msgLength, 0, destAddr, addrLen);
+  size_t segmentCount = 0;
+  char *segments = createTCPSegments(msg, msgLength, &segmentCount, destAddr);
+
+  printTCPSegments(segments, segmentCount);
+
+  for (int i = 0; i < segmentCount; i++) {
+    sendto(sendFD, segments + i * max_segment_size, max_segment_size, 0,
+           destAddr, addrLen);
+  }
+
+  free(segments);
 }
 
 void send_file(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,

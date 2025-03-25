@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "log.h"
+#include "protocols.h"
 #include "response.h"
 
 int sendFD;
@@ -61,13 +62,13 @@ int main(int argc, char **argv) {
   }
   LOG_GENERAL("Created receive socket: %d\n", recvFD);
 
+  port_number = port + 1;
+  src_ip = inet_addr(addrLoc);
+
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
-      .sin_port = htons(port),
-      .sin_addr =
-          {
-              .s_addr = inet_addr(addrLoc),
-          },
+      .sin_port = htons(port + 1),
+      .sin_addr.s_addr = inet_addr(addrLoc),
   };
 
   if (bind(sendFD, (struct sockaddr *)&addr, sizeof(addr))) {
@@ -76,6 +77,7 @@ int main(int argc, char **argv) {
     exit(-1);
   };
 
+  addr.sin_port = htons(port);
   if (bind(recvFD, (struct sockaddr *)&addr, sizeof(addr))) {
     fprintf(stderr, "Failed to bind socket: %d : %s\n", recvFD,
             strerror(errno));
@@ -107,7 +109,11 @@ int main(int argc, char **argv) {
       fprintf(stderr, "Failed to accept connection\n");
       continue;
     }
-    LOG_GENERAL("Connected\n");
+    {
+      struct sockaddr_in *data = (struct sockaddr_in *)clientAddr;
+      LOG_GENERAL("Connected to | %s:%d\n", inet_ntoa(data->sin_addr),
+                  ntohs(data->sin_port));
+    }
 
     size_t totalRead = 0;
     ssize_t msgLength = 0;

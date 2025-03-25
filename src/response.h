@@ -1,4 +1,5 @@
-#pragma once
+#ifndef RESPONSE_H
+#define RESPONSE_H
 
 #include <stdlib.h>
 
@@ -10,3 +11,5 @@ extern void cleanup();
 
 void handle_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
                 char *data, size_t length);
+
+#endif

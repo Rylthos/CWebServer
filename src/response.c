@@ -85,7 +85,7 @@ int parse_file_ext(char *filename, size_t length, char **fileBuf,
       break;
     }
     default:
-      F_LOG_GENERAL(stderr, "Unkonwn file type: %.*s\n", (int)length, filename);
+      F_LOG_GENERAL(stderr, "Unknown file type: %.*s\n", (int)length, filename);
       *header = &errorString;
       return -1;
     }
@@ -96,8 +96,6 @@ int parse_file_ext(char *filename, size_t length, char **fileBuf,
 
 void send_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
               const char *msg, size_t msgLength) {
-  // Add headers
-
   LOG_SEND("%.*s", (int)msgLength, msg);
 
   size_t segmentCount = 0;
@@ -105,6 +103,7 @@ void send_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
 
   printTCPSegments(segments, segmentCount);
 
+  printf("Sending Segments\n");
   for (int i = 0; i < segmentCount; i++) {
     sendto(sendFD, segments + i * max_segment_size, max_segment_size, 0,
            destAddr, addrLen);

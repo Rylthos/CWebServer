@@ -9,6 +9,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "log.h"
+
 uint32_t src_ip;
 int port_number;
 
@@ -57,21 +59,12 @@ void printTCPSegments(char *segments, size_t segmentCount) {
     printf("urgent_ptr : %d\n", ntohs(header->urgent_ptr));
     printf("data       :\n\t");
 
-    const int max_length = 16;
-    char store[max_length];
-    for (int i = 0; i < max_data_size; i++) {
-      if (i != 0 && i % max_length == 0) {
-        printf("\t%.*s\n\t", max_length, store);
-      }
+    print_hex((uint8_t *)currentSegment + sizeof(struct tcpHeader),
+              max_data_size, "\t");
+    printf("RAW\n");
+    print_hex((uint8_t *)currentSegment, max_segment_size, "");
 
-      char data = *(currentSegment + sizeof(struct tcpHeader) + i);
-      store[i % max_length] = data;
-      if (data < 32)
-        store[i % max_length] = '.';
-
-      printf("%02x ", data);
-    }
-    printf("\n******************** SEGM %3d ********************\n", i);
+    printf("******************** SEGM %3d ********************\n", i);
   }
   fwrite(segments, segmentCount * max_segment_size, 1, f);
   fclose(f);
@@ -110,19 +103,16 @@ char *createTCPSegments(const char *data, size_t data_length,
 
     memcpy(segment + sizeof(struct tcpHeader), data, length);
 
-    header.seq_num = htonl(i * max_data_size);
+    // header.seq_num = i * max_data_size;
+    header.seq_num = htonl(0);
 
-    if (i == 0) {
-      header.SYN = 1;
-    } else {
-      header.SYN = 0;
-    }
-
-    if (i == *segmentCount - 1) {
-      header.FIN = 1;
-    } else {
-      header.FIN = 0;
-    }
+    header.PSH = 1;
+    // header.PSH = 1;
+    // if (i == 0) {
+    //   header.SYN = 1;
+    // } else {
+    //   header.SYN = 0;
+    // }
 
     memcpy(segment, &header, sizeof(struct tcpHeader));
     header.checksum = checksum(segment, max_segment_size, &ipHeader);

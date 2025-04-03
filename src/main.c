@@ -62,12 +62,12 @@ int main(int argc, char **argv) {
   }
   LOG_GENERAL("Created receive socket: %d\n", recvFD);
 
-  port_number = port + 1;
+  port_number = port;
   src_ip = inet_addr(addrLoc);
 
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
-      .sin_port = htons(port + 1),
+      .sin_port = htons(port),
       .sin_addr.s_addr = inet_addr(addrLoc),
   };
 

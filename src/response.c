@@ -27,7 +27,6 @@ static const char *jsHeaderString =
     "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n";
 
 static regex_t s_GetRegex;
-
 static char *s_SourceLoc;
 
 void setup(char *sourceLoc) {
@@ -94,30 +93,42 @@ int parse_file_ext(char *filename, size_t length, char **fileBuf,
   return 0;
 }
 
-void send_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
-              const char *msg, size_t msgLength) {
-  LOG_SEND("%.*s", (int)msgLength, msg);
+void send_msg(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
+              int seq_num, int ack_seq, int serverFD, uint8_t *buf,
+              ssize_t buf_length) {
+  LOG_SEND("%.*s", (int)buf_length, buf);
 
-  size_t size = 0;
-  char *segment = createTCPSegments(msg, msgLength, &size, destAddr);
+  uint32_t packet_size;
+  uint8_t *packet;
+  createDataPacket(srcAddr, destAddr, seq_num, ack_seq, buf, buf_length,
+                   &packet, &packet_size);
 
-  printTCPSegment(segment, size);
+  int sent = sendto(serverFD, packet, packet_size, 0,
+                    (struct sockaddr *)destAddr, sizeof(*destAddr));
 
-  printf("Sending Segments\n");
-  sendto(sendFD, segment, size, 0, destAddr, addrLen);
+  if (sent == -1) {
+    fprintf(stderr, "Failed to send msg\n");
+  } else {
+    printf("Sent %d bytes\n", sent);
+  }
 
-  free(segment);
+  LOG_SEND_HEADER_START;
+  printIPPacket(packet, packet_size);
+  printTCPSegment(packet + sizeof(IPHeader), packet_size - sizeof(IPHeader));
+  LOG_SEND_HEADER_END;
 }
 
-void send_file(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
-               char *filename, size_t length) {
+void send_file(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
+               int seq_num, int ack_seq, int serverFD, char *filename,
+               ssize_t length) {
   FILE *file;
 
   const char **header;
 
   char *fileBuf = malloc(500 * sizeof(char));
   if (parse_file_ext(filename, length, &fileBuf, &header)) { // Error occured
-    send_msg(destAddr, addrLen, sendFD, fileBuf, strlen(fileBuf));
+    send_msg(srcAddr, destAddr, seq_num, ack_seq, serverFD, (uint8_t *)fileBuf,
+             strlen(fileBuf));
     return;
   }
 
@@ -125,7 +136,8 @@ void send_file(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
 
   if (file == NULL) {
     LOG_GENERAL("File doesnt exist: %.*s\n", (int)length, filename);
-    send_msg(destAddr, addrLen, sendFD, errorString, strlen(errorString));
+    send_msg(srcAddr, destAddr, seq_num, ack_seq, serverFD,
+             (uint8_t *)errorString, strlen(errorString));
     return;
   }
 
@@ -139,29 +151,34 @@ void send_file(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
   fread(buf + strlen(*header), 1, totalLength - strlen(*header), file);
   buf[totalLength] = 0;
 
-  // LOG_SEND("%.*s", (int)totalLength, buf);
-  send_msg(destAddr, addrLen, sendFD, buf, totalLength);
+  send_msg(srcAddr, destAddr, seq_num, ack_seq, serverFD, (uint8_t *)buf,
+           totalLength);
 
   free(buf);
   free(fileBuf);
 }
 
-void handle_get(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
-                char *data, size_t length) {
-  if (data[0] == '/') {
-    send_file(destAddr, addrLen, sendFD, data, length);
+void handle_get(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
+                int seq_num, int ack_seq, int serverFD, uint8_t *buf,
+                ssize_t buf_length) {
+  if (buf[0] == '/') {
+    send_file(srcAddr, destAddr, seq_num, ack_seq, serverFD, (char *)buf,
+              buf_length);
   }
 }
 
-void handle_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
-                char *data, size_t length) {
-  LOG_RECV("%.*s", (int)length, data);
+void handle_msg(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
+                int seq_num, int ack_seq, int serverFD, uint8_t *buf,
+                ssize_t buf_length) {
+
+  LOG_RECV("%.*s", (int)buf_length, buf);
 
   regmatch_t *match = malloc((s_GetRegex.re_nsub + 1) * sizeof(regmatch_t));
-  int retV = regexec(&s_GetRegex, data, s_GetRegex.re_nsub + 1, match, 0);
+  int retV =
+      regexec(&s_GetRegex, (char *)buf, s_GetRegex.re_nsub + 1, match, 0);
   if (!retV) { // handle get Request
-    handle_get(destAddr, addrLen, sendFD, data + match[1].rm_so,
-               match[1].rm_eo - match[1].rm_so);
+    handle_get(srcAddr, destAddr, seq_num, ack_seq, serverFD,
+               buf + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
   }
 
   free(match);

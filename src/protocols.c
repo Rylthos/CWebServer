@@ -1,5 +1,6 @@
 #include "protocols.h"
 
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/socket.h>
@@ -15,7 +16,7 @@
 uint32_t src_ip;
 int port_number;
 
-uint16_t checksum(const char *data, size_t data_length) {
+uint16_t checksum(const uint8_t *data, size_t data_length) {
   uint32_t sum = 0, i;
   for (i = 0; i < data_length - 1; i += 2) {
     uint16_t v = *(uint16_t *)&data[i];
@@ -34,17 +35,36 @@ uint16_t checksum(const char *data, size_t data_length) {
   return ~sum;
 }
 
-void printTCPSegment(char *segment, size_t segment_size) {
-  FILE *f;
-  f = fopen("output.bin", "wb");
-  char *currentSegment = segment;
+void printIPPacket(const uint8_t *packet, size_t packet_size) {
+  IPHeader *header = (IPHeader *)packet;
 
-  struct tcpHeader *header = (struct tcpHeader *)currentSegment;
+  printf("********************  IP  ********************\n");
+  printf("Version         : %d\n", header->version);
+  printf("IHL             : %d\n", header->IHL);
+  printf("TOS             : %d\n", header->tos);
+  printf("Total Length    : %u\n", ntohs(header->total_length));
+  printf("ID              : %u\n", ntohs(header->id));
+  printf("Fragment Offset : %d\n", ntohs(header->fragment_offset));
+  printf("TTL             : %d\n", header->ttl);
+  printf("Protocol        : %d\n", header->protocol);
+  printf("Checksum        : 0x%04x\n", header->checksum);
+  printf("Src Addr        : %s\n",
+         inet_ntoa(*(struct in_addr *)&header->src_addr));
+  printf("Dst Addr        : %s\n",
+         inet_ntoa(*(struct in_addr *)&header->dst_addr));
+  printf("RAW\n");
+  print_hex(packet, packet_size, "");
+  printf("********************  IP  ********************\n");
+}
 
-  printf("******************** SEGM ********************\n");
+void printTCPSegment(const uint8_t *segment, size_t segment_size) {
+  TCPHeader *header = (TCPHeader *)segment;
+
+  printf("******************** TCP ********************\n");
   printf("src_port   : %5d\n", ntohs(header->src_port));
   printf("dst_port   : %5d\n", ntohs(header->dst_port));
-  printf("seq_num    : %5d\n", ntohl(header->seq_num));
+  printf("seq_num    : %5u\n", ntohl(header->seq_num));
+  printf("ack_num    : %5u\n", ntohl(header->ack_num));
   printf("data_offset: %5d\n", header->data_offset);
   printf("flags      |\n");
   printf("           |- CWR: %d\n", header->CWR);
@@ -60,57 +80,253 @@ void printTCPSegment(char *segment, size_t segment_size) {
   printf("urgent_ptr : %d\n", ntohs(header->urgent_ptr));
   printf("data       :\n\t");
 
-  print_hex((uint8_t *)currentSegment + sizeof(struct tcpHeader), max_data_size,
-            "\t");
+  print_hex((uint8_t *)segment + sizeof(TCPHeader),
+            segment_size - sizeof(TCPHeader), "\t");
   printf("RAW\n");
-  print_hex((uint8_t *)currentSegment, max_segment_size, "");
+  print_hex((uint8_t *)segment, segment_size, "");
 
-  printf("******************** SEGM ********************\n");
-  fwrite(segment, segment_size, 1, f);
-  fclose(f);
+  printf("******************** TCP ********************\n");
 }
 
-char *createTCPSegments(const char *data, size_t data_length,
-                        size_t *segment_size, struct sockaddr *dstAddr) {
-  // *segmentCount = data_length / max_data_size + 1;
-  char *segment = calloc(data_length + sizeof(struct tcpHeader), sizeof(char));
-  *segment_size = data_length + sizeof(struct tcpHeader);
+void createSynAckPacket(struct sockaddr_in *src_addr,
+                        struct sockaddr_in *dst_addr, int32_t seq_num,
+                        int32_t ack_seq, uint8_t **packet,
+                        uint32_t *packet_len) {
 
-  struct tcpHeader *header = (struct tcpHeader *)segment;
-  char *data_loc = segment + sizeof(struct tcpHeader);
+  size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader);
+  uint8_t *datagram = calloc(total_size, sizeof(uint8_t));
 
-  memcpy(data_loc, data, data_length);
+  IPHeader *ipHeader = (IPHeader *)datagram;
+  TCPHeader *tcpHeader = (TCPHeader *)(datagram + sizeof(IPHeader));
+  PseudoIPHeader pseudoHeader;
 
-  struct pseudoHeader ipHeader;
-  ipHeader.src_ip = src_ip;
-  ipHeader.dst_ip = ((struct sockaddr_in *)dstAddr)->sin_addr.s_addr;
-  ipHeader.fixed = 0;
-  ipHeader.protocol = IPPROTO_TCP;
-  ipHeader.segment_length = htons(data_length + sizeof(struct tcpHeader));
+  ipHeader->IHL = 5;
+  ipHeader->version = 4;
+  ipHeader->tos = 0;
+  ipHeader->total_length = htons(total_size);
+  ipHeader->id = htonl(rand() % 65535);
+  ipHeader->fragment_offset = 0;
+  ipHeader->ttl = 64;
+  ipHeader->protocol = IPPROTO_TCP;
+  ipHeader->checksum = 0;
+  ipHeader->src_addr = src_addr->sin_addr.s_addr;
+  ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
 
-  header->src_port = htons(port_number);
-  header->dst_port = ((struct sockaddr_in *)dstAddr)->sin_port;
-  header->data_offset = 5;
-  header->window = htons(5840);
-  header->seq_num = 1;
-  header->ack_num = 350;
-  header->PSH = 1;
-  header->ACK = 1;
-  header->checksum = 0;
+  tcpHeader->src_port = src_addr->sin_port;
+  tcpHeader->dst_port = dst_addr->sin_port;
+  tcpHeader->seq_num = htonl(seq_num);
+  tcpHeader->ack_num = htonl(ack_seq);
+  tcpHeader->data_offset = 5;
+  tcpHeader->FIN = 0;
+  tcpHeader->SYN = 1;
+  tcpHeader->RST = 0;
+  tcpHeader->PSH = 0;
+  tcpHeader->ACK = 1;
+  tcpHeader->URG = 0;
+  tcpHeader->checksum = 0;
+  tcpHeader->window = htons(5840);
+  tcpHeader->urgent_ptr = 0;
 
-  size_t pseudogram_size =
-      sizeof(struct pseudoHeader) + sizeof(struct tcpHeader) + data_length;
-  char *pseudogram = calloc(pseudogram_size, sizeof(char));
+  pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
+  pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
+  pseudoHeader.fixed = 0;
+  pseudoHeader.protocol = IPPROTO_TCP;
+  pseudoHeader.segment_length = htons(sizeof(TCPHeader));
 
-  memcpy(pseudogram, (char *)&ipHeader, sizeof(struct pseudoHeader));
+  size_t pseudogram_size = sizeof(PseudoIPHeader) + sizeof(TCPHeader);
+  uint8_t *pseudogram = calloc(pseudogram_size, sizeof(uint8_t));
 
-  for (int i = 0; i < sizeof(struct tcpHeader) + data_length; i++) {
-    *(pseudogram + sizeof(struct pseudoHeader) + i) = segment[i];
-  }
+  memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
+  memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader, sizeof(TCPHeader));
 
-  header->checksum = checksum(pseudogram, pseudogram_size);
+  tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
+  ipHeader->checksum = checksum(datagram, total_size);
+
+  *packet = datagram;
+  *packet_len = total_size;
 
   free(pseudogram);
+}
 
-  return segment;
+void createAckPacket(struct sockaddr_in *src_addr, struct sockaddr_in *dst_addr,
+                     int32_t seq_num, int32_t ack_seq, uint8_t **packet,
+                     uint32_t *packet_len) {
+
+  size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader);
+  uint8_t *datagram = calloc(total_size, sizeof(uint8_t));
+
+  IPHeader *ipHeader = (IPHeader *)datagram;
+  TCPHeader *tcpHeader = (TCPHeader *)(datagram + sizeof(IPHeader));
+  PseudoIPHeader pseudoHeader;
+
+  ipHeader->IHL = 5;
+  ipHeader->version = 4;
+  ipHeader->tos = 0;
+  ipHeader->total_length = htons(total_size);
+  ipHeader->id = htonl(rand() % 65535);
+  ipHeader->fragment_offset = 0;
+  ipHeader->ttl = 64;
+  ipHeader->protocol = IPPROTO_TCP;
+  ipHeader->checksum = 0;
+  ipHeader->src_addr = src_addr->sin_addr.s_addr;
+  ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
+
+  tcpHeader->src_port = src_addr->sin_port;
+  tcpHeader->dst_port = dst_addr->sin_port;
+  tcpHeader->seq_num = htonl(seq_num);
+  tcpHeader->ack_num = htonl(ack_seq);
+  tcpHeader->data_offset = 5;
+  tcpHeader->FIN = 0;
+  tcpHeader->SYN = 0;
+  tcpHeader->RST = 0;
+  tcpHeader->PSH = 0;
+  tcpHeader->ACK = 1;
+  tcpHeader->URG = 0;
+  tcpHeader->checksum = 0;
+  tcpHeader->window = htons(5840);
+  tcpHeader->urgent_ptr = 0;
+
+  pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
+  pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
+  pseudoHeader.fixed = 0;
+  pseudoHeader.protocol = IPPROTO_TCP;
+  pseudoHeader.segment_length = htons(sizeof(TCPHeader));
+
+  size_t pseudogram_size = sizeof(PseudoIPHeader) + sizeof(TCPHeader);
+  uint8_t *pseudogram = calloc(pseudogram_size, sizeof(uint8_t));
+
+  memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
+  memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader, sizeof(TCPHeader));
+
+  tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
+  ipHeader->checksum = checksum(datagram, total_size);
+
+  *packet = datagram;
+  *packet_len = total_size;
+
+  free(pseudogram);
+}
+
+void createDataPacket(struct sockaddr_in *src_addr,
+                      struct sockaddr_in *dst_addr, int32_t seq_num,
+                      int32_t ack_seq, uint8_t *data, uint32_t data_length,
+                      uint8_t **packet, uint32_t *packet_len) {
+
+  size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader) + data_length;
+  uint8_t *datagram = calloc(total_size, sizeof(uint8_t));
+
+  IPHeader *ipHeader = (IPHeader *)datagram;
+  TCPHeader *tcpHeader = (TCPHeader *)(datagram + sizeof(IPHeader));
+  PseudoIPHeader pseudoHeader;
+
+  uint8_t *payload = datagram + sizeof(IPHeader) + sizeof(TCPHeader);
+  memcpy(payload, data, data_length);
+
+  ipHeader->IHL = 5;
+  ipHeader->version = 4;
+  ipHeader->tos = 0;
+  ipHeader->total_length = total_size;
+  ipHeader->id = htonl(rand() % 65535);
+  ipHeader->fragment_offset = 0;
+  ipHeader->ttl = 64;
+  ipHeader->protocol = IPPROTO_TCP;
+  ipHeader->checksum = 0;
+  ipHeader->src_addr = src_addr->sin_addr.s_addr;
+  ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
+
+  tcpHeader->src_port = src_addr->sin_port;
+  tcpHeader->dst_port = dst_addr->sin_port;
+  tcpHeader->seq_num = htonl(seq_num);
+  tcpHeader->ack_num = htonl(ack_seq);
+  tcpHeader->data_offset = 5;
+  tcpHeader->FIN = 0;
+  tcpHeader->SYN = 0;
+  tcpHeader->RST = 0;
+  tcpHeader->PSH = 1;
+  tcpHeader->ACK = 1;
+  tcpHeader->URG = 0;
+  tcpHeader->checksum = 0;
+  tcpHeader->window = htons(5840);
+  tcpHeader->urgent_ptr = 0;
+
+  pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
+  pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
+  pseudoHeader.fixed = 0;
+  pseudoHeader.protocol = IPPROTO_TCP;
+  pseudoHeader.segment_length = htons(sizeof(TCPHeader) + data_length);
+
+  size_t pseudogram_size =
+      sizeof(PseudoIPHeader) + sizeof(TCPHeader) + data_length;
+  uint8_t *pseudogram = malloc(pseudogram_size);
+
+  memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
+  memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader,
+         sizeof(TCPHeader) + data_length);
+
+  tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
+  ipHeader->checksum = checksum(datagram, total_size);
+
+  *packet = datagram;
+  *packet_len = total_size;
+
+  free(pseudogram);
+}
+
+void createFinPacket(struct sockaddr_in *src_addr, struct sockaddr_in *dst_addr,
+                     int32_t seq_num, int32_t ack_seq, uint8_t **packet,
+                     uint32_t *packet_len) {
+
+  size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader);
+  uint8_t *datagram = calloc(total_size, sizeof(uint8_t));
+
+  IPHeader *ipHeader = (IPHeader *)datagram;
+  TCPHeader *tcpHeader = (TCPHeader *)(datagram + sizeof(IPHeader));
+  PseudoIPHeader pseudoHeader;
+
+  ipHeader->IHL = 5;
+  ipHeader->version = 4;
+  ipHeader->tos = 0;
+  ipHeader->total_length = htons(total_size);
+  ipHeader->id = htonl(rand() % 65535);
+  ipHeader->fragment_offset = 0;
+  ipHeader->ttl = 64;
+  ipHeader->protocol = IPPROTO_TCP;
+  ipHeader->checksum = 0;
+  ipHeader->src_addr = src_addr->sin_addr.s_addr;
+  ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
+
+  tcpHeader->src_port = src_addr->sin_port;
+  tcpHeader->dst_port = dst_addr->sin_port;
+  tcpHeader->seq_num = htonl(seq_num);
+  tcpHeader->ack_num = htonl(ack_seq);
+  tcpHeader->data_offset = 5;
+  tcpHeader->FIN = 1;
+  tcpHeader->SYN = 0;
+  tcpHeader->RST = 0;
+  tcpHeader->PSH = 0;
+  tcpHeader->ACK = 0;
+  tcpHeader->URG = 0;
+  tcpHeader->checksum = 0;
+  tcpHeader->window = htons(5840);
+  tcpHeader->urgent_ptr = 0;
+
+  pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
+  pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
+  pseudoHeader.fixed = 0;
+  pseudoHeader.protocol = IPPROTO_TCP;
+  pseudoHeader.segment_length = htons(sizeof(TCPHeader));
+
+  size_t pseudogram_size = sizeof(PseudoIPHeader) + sizeof(TCPHeader);
+  uint8_t *pseudogram = calloc(pseudogram_size, sizeof(uint8_t));
+
+  memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
+  memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader, sizeof(TCPHeader));
+
+  tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
+  ipHeader->checksum = checksum(datagram, total_size);
+
+  *packet = datagram;
+  *packet_len = total_size;
+
+  free(pseudogram);
 }

@@ -5,7 +5,7 @@
 
 #define MAX_STORE_LENGTH 16
 
-void print_hex(uint8_t *buf, size_t length, const char *prefix) {
+void print_hex(const uint8_t *buf, size_t length, const char *prefix) {
   static char store[MAX_STORE_LENGTH];
 
   static char fmt_string[80];
@@ -24,5 +24,11 @@ void print_hex(uint8_t *buf, size_t length, const char *prefix) {
 
     printf("%02x ", data);
   }
-  printf("\t%.*s\n", (int)length % MAX_STORE_LENGTH, store);
+  if (length % MAX_STORE_LENGTH != 0) {
+    for (int i = 0; i < MAX_STORE_LENGTH - (length % MAX_STORE_LENGTH); i++) {
+      printf("   ");
+      store[i + length % MAX_STORE_LENGTH] = '.';
+    }
+  }
+  printf("\t%.*s\n", MAX_STORE_LENGTH, store);
 }

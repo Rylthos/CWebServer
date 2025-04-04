@@ -92,8 +92,10 @@ char *createTCPSegments(const char *data, size_t data_length,
   header->dst_port = ((struct sockaddr_in *)dstAddr)->sin_port;
   header->data_offset = 5;
   header->window = htons(5840);
-  header->seq_num = htonl(0);
-  header->FIN = 1;
+  header->seq_num = 1;
+  header->ack_num = 350;
+  header->PSH = 1;
+  header->ACK = 1;
   header->checksum = 0;
 
   size_t pseudogram_size =

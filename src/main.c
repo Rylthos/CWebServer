@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
 
   recvFD = socket(AF_INET, SOCK_STREAM, 0);
   if (recvFD == -1) {
-    fprintf(stderr, "Failde to created receive socket: %s | %d",
+    fprintf(stderr, "Failed to created receive socket: %s | %d",
             strerror(errno), errno);
     return -1;
   }
@@ -137,7 +137,8 @@ int main(int argc, char **argv) {
 
     handle_msg(clientAddr, clientAddrSize, sendFD, readBuf, totalRead);
 
-    close(clientSocket);
+    shutdown(clientSocket, SHUT_WR);
+    // close(clientSocket);
     LOG_GENERAL("Closed socket\n");
   }
 

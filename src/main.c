@@ -33,6 +33,14 @@ void int_handler(int v) {
   exit(-2);
 }
 
+void getSeqAckPortIP(uint8_t *buffer, uint32_t *seq_num, uint32_t *ack_seq,
+                     uint16_t *port, uint32_t *ip) {
+  *seq_num = ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->seq_num);
+  *ack_seq = ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->ack_num);
+  *port = ((TCPHeader *)(buffer + sizeof(IPHeader)))->src_port;
+  *ip = ((IPHeader *)buffer)->src_addr;
+}
+
 int main(int argc, char **argv) {
   signal(SIGINT, int_handler);
 
@@ -85,14 +93,16 @@ int main(int argc, char **argv) {
   readBuf[readBufLength] = 0;
 
   struct sockaddr_in clientAddr;
-  socklen_t clientAddrSize = sizeof(clientAddr);
 
   ssize_t packet_size;
   uint8_t buffer[65535];
   int32_t current_port = -1;
+
+  uint32_t seq_num, ack_seq, ip;
+  uint16_t port_number;
+
   while (1) {
-    packet_size = recvfrom(serverFD, buffer, 65535, 0,
-                           (struct sockaddr *)&clientAddr, &clientAddrSize);
+    packet_size = recvfrom(serverFD, buffer, 65535, 0, NULL, NULL);
 
     if (packet_size == -1) {
       fprintf(stderr, "Failed to get packet\n");
@@ -107,75 +117,113 @@ int main(int argc, char **argv) {
     printTCPSegment(buffer + sizeof(IPHeader), packet_size - sizeof(IPHeader));
     LOG_RECV_HEADER_END;
 
-    uint32_t seq_num =
-        ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->seq_num);
-    uint32_t ack_seq =
-        ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->ack_num);
-    clientAddr.sin_port = ((TCPHeader *)(buffer + sizeof(IPHeader)))->src_port;
+    getSeqAckPortIP(buffer, &seq_num, &ack_seq, &port_number, &ip);
 
-    current_port = clientAddr.sin_port;
+    clientAddr.sin_family = AF_INET;
+    clientAddr.sin_port = port_number;
+    clientAddr.sin_addr.s_addr = ip;
 
-    uint8_t *ack_packet;
-    uint32_t ack_packet_size;
+    PacketType type = getTCPPacketType(buffer);
 
-    uint32_t new_seq_num = seq_num + 1;
-    createSynAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &ack_packet,
-                       &ack_packet_size);
+    switch (type) {
+    case SYN: // Respond with SYN ACK
+    {
+      printf("RECIEVED: SYN\n");
+      uint8_t *packet;
+      uint32_t packet_size;
 
-    int sent = sendto(serverFD, ack_packet, ack_packet_size, 0,
-                      (struct sockaddr *)&clientAddr, clientAddrSize);
-    LOG_SEND_HEADER_START;
-    printIPPacket(ack_packet, ack_packet_size);
-    printTCPSegment(ack_packet + sizeof(IPHeader),
-                    ack_packet_size - sizeof(IPHeader));
-    LOG_SEND_HEADER_END;
+      int new_seq_num = seq_num + 1;
+      createSynAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
+                         &packet_size);
 
-    if (sent == -1) {
-      fprintf(stderr, "Replying ACK failed\n");
-    } else {
-      printf("Sent %d bytes ACK!\n", sent);
+      int sent = sendto(serverFD, packet, packet_size, 0,
+                        (struct sockaddr *)&clientAddr, sizeof(clientAddr));
+
+      if (sent == -1) {
+        printf("Failed to send bytes\n");
+      } else {
+        printf("Sent %d bytes. SYN ACK\n", sent);
+      }
+
+      free(packet);
+
+      break;
     }
+    case PSH: {
+      printf("RECIEVED: PSH\n");
 
-    free(ack_packet);
-    ack_packet = NULL;
+      uint8_t *packet;
+      uint32_t packet_size;
 
-    do {
-      // Should be an ACK
-      packet_size = recvfrom(serverFD, buffer, 65535, 0,
-                             (struct sockaddr *)&clientAddr, &clientAddrSize);
+      int new_seq_num = seq_num + 1;
+      createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
+                      &packet_size);
 
-      LOG_RECV_HEADER_START;
-      printIPPacket(buffer, packet_size);
-      printTCPSegment(buffer + sizeof(IPHeader), packet_size);
-      LOG_RECV_HEADER_END;
+      int sent = sendto(serverFD, packet, packet_size, 0,
+                        (struct sockaddr *)&clientAddr, sizeof(clientAddr));
 
-      // Should be data
-      packet_size = recvfrom(serverFD, buffer, 65535, 0,
-                             (struct sockaddr *)&clientAddr, &clientAddrSize);
+      if (sent == -1) {
+        printf("Failed to send bytes\n");
+      } else {
+        printf("Sent %d bytes. ACK\n", sent);
+      }
 
-      LOG_RECV_HEADER_START;
-      printIPPacket(buffer, packet_size);
-      printTCPSegment(buffer + sizeof(IPHeader), packet_size);
-      LOG_RECV_HEADER_END;
+      uint8_t *offset_buffer = buffer + sizeof(TCPHeader) + sizeof(IPHeader);
+      int32_t buffer_size = packet_size - sizeof(TCPHeader) - sizeof(IPHeader);
 
-      seq_num = ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->seq_num);
-      ack_seq = ntohl(((TCPHeader *)(buffer + sizeof(IPHeader)))->ack_num);
-      clientAddr.sin_port =
-          ((TCPHeader *)(buffer + sizeof(IPHeader)))->src_port;
-    } while (clientAddr.sin_port != current_port);
+      handle_msg(&addr, &clientAddr, ack_seq, new_seq_num, serverFD,
+                 offset_buffer, buffer_size);
 
-    handle_msg(&addr, &clientAddr, ack_seq, new_seq_num, serverFD,
-               buffer + sizeof(TCPHeader) + sizeof(IPHeader),
-               packet_size - sizeof(TCPHeader) - sizeof(IPHeader));
+      createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
+                         &packet_size);
 
-    // Should be an ACK
-    packet_size = recvfrom(serverFD, buffer, 65535, 0,
-                           (struct sockaddr *)&clientAddr, &clientAddrSize);
+      sent = sendto(serverFD, packet, packet_size, 0,
+                    (struct sockaddr *)&clientAddr, sizeof(clientAddr));
 
-    LOG_RECV_HEADER_START;
-    printIPPacket(buffer, packet_size);
-    printTCPSegment(buffer + sizeof(IPHeader), packet_size);
-    LOG_RECV_HEADER_END;
+      if (sent == -1) {
+        printf("Failed to send bytes\n");
+      } else {
+        printf("Sent %d bytes. ACK\n", sent);
+      }
+      break;
+      break;
+    }
+    case FIN: {
+      uint8_t *packet;
+      uint32_t packet_size;
+
+      int new_seq_num = seq_num + 1;
+      createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
+                      &packet_size);
+
+      int sent = sendto(serverFD, packet, packet_size, 0,
+                        (struct sockaddr *)&clientAddr, sizeof(clientAddr));
+
+      if (sent == -1) {
+        printf("Failed to send bytes\n");
+      } else {
+        printf("Sent %d bytes. ACK\n", sent);
+      }
+
+      createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
+                         &packet_size);
+
+      sent = sendto(serverFD, packet, packet_size, 0,
+                    (struct sockaddr *)&clientAddr, sizeof(clientAddr));
+
+      if (sent == -1) {
+        printf("Failed to send bytes\n");
+      } else {
+        printf("Sent %d bytes. ACK\n", sent);
+      }
+      break;
+    }
+    case ACK:
+      printf("RECIEVED: ACK\n");
+      break;
+    default:
+      fprintf(stderr, "Unhandled type");
+    }
   }
 
   cleanup_socket();

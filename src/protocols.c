@@ -88,6 +88,22 @@ void printTCPSegment(const uint8_t *segment, size_t segment_size) {
   printf("******************** TCP ********************\n");
 }
 
+PacketType getTCPPacketType(uint8_t *packet) {
+  TCPHeader *header = (TCPHeader *)(packet + sizeof(IPHeader));
+
+  if (header->SYN) {
+    return SYN;
+  } else if (header->FIN) {
+    return FIN;
+  } else if (header->PSH) {
+    return PSH;
+  } else if (header->ACK) {
+    return ACK;
+  }
+
+  return NONE;
+}
+
 void createSynAckPacket(struct sockaddr_in *src_addr,
                         struct sockaddr_in *dst_addr, int32_t seq_num,
                         int32_t ack_seq, uint8_t **packet,
@@ -272,9 +288,10 @@ void createDataPacket(struct sockaddr_in *src_addr,
   free(pseudogram);
 }
 
-void createFinPacket(struct sockaddr_in *src_addr, struct sockaddr_in *dst_addr,
-                     int32_t seq_num, int32_t ack_seq, uint8_t **packet,
-                     uint32_t *packet_len) {
+void createFinAckPacket(struct sockaddr_in *src_addr,
+                        struct sockaddr_in *dst_addr, int32_t seq_num,
+                        int32_t ack_seq, uint8_t **packet,
+                        uint32_t *packet_len) {
 
   size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader);
   uint8_t *datagram = calloc(total_size, sizeof(uint8_t));
@@ -304,7 +321,7 @@ void createFinPacket(struct sockaddr_in *src_addr, struct sockaddr_in *dst_addr,
   tcpHeader->SYN = 0;
   tcpHeader->RST = 0;
   tcpHeader->PSH = 0;
-  tcpHeader->ACK = 0;
+  tcpHeader->ACK = 1;
   tcpHeader->URG = 0;
   tcpHeader->checksum = 0;
   tcpHeader->window = htons(5840);

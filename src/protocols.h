@@ -69,8 +69,18 @@ typedef struct tcpHeader {
 
 uint16_t checksum(const uint8_t *data, size_t data_length);
 
+typedef enum packetType {
+  NONE,
+  ACK,
+  SYN,
+  PSH,
+  FIN,
+} PacketType;
+
 void printIPPacket(const uint8_t *packet, size_t packet_size);
 void printTCPSegment(const uint8_t *segment, size_t segment_size);
+
+PacketType getTCPPacketType(uint8_t *packet);
 
 void createSynAckPacket(struct sockaddr_in *src_addr,
                         struct sockaddr_in *dst_addr, int32_t seq_num,
@@ -86,7 +96,8 @@ void createDataPacket(struct sockaddr_in *src_addr,
                       int32_t ack_seq, uint8_t *data, uint32_t data_length,
                       uint8_t **packet, uint32_t *packet_len);
 
-void createFinPacket(struct sockaddr_in *src_addr, struct sockaddr_in *dst_addr,
-                     int32_t seq_num, int32_t ack_seq, uint8_t **packet,
-                     uint32_t *packet_len);
+void createFinAckPacket(struct sockaddr_in *src_addr,
+                        struct sockaddr_in *dst_addr, int32_t seq_num,
+                        int32_t ack_seq, uint8_t **packet,
+                        uint32_t *packet_len);
 #endif

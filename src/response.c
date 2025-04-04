@@ -170,15 +170,15 @@ void handle_get(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
 void handle_msg(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
                 int seq_num, int ack_seq, int serverFD, uint8_t *buf,
                 ssize_t buf_length) {
-
-  LOG_RECV("%.*s", (int)buf_length, buf);
-
   regmatch_t *match = malloc((s_GetRegex.re_nsub + 1) * sizeof(regmatch_t));
   int retV =
       regexec(&s_GetRegex, (char *)buf, s_GetRegex.re_nsub + 1, match, 0);
+
   if (!retV) { // handle get Request
     handle_get(srcAddr, destAddr, seq_num, ack_seq, serverFD,
                buf + match[1].rm_so, match[1].rm_eo - match[1].rm_so);
+  } else {
+    printf("Unknown request:\n%.*s\n", (int)buf_length, buf);
   }
 
   free(match);

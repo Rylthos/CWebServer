@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/types.h>
 #include <unistd.h>
 
 #include "log.h"
@@ -14,110 +15,100 @@
 uint32_t src_ip;
 int port_number;
 
-// static const int max_segment_size = 536;
-// static const int max_data_size = max_segment_size - sizeof(struct tcpHeader);
-
-int checksum(char *data, size_t data_length, struct pseudoHeader *header) {
-  uint16_t checksum = 0;
-  checksum += header->src_ip >> 16;
-  checksum += header->src_ip & 0xFFFF;
-  checksum += header->dst_ip >> 16;
-  checksum += header->dst_ip & 0xFFFF;
-  checksum += ((uint16_t)header->fixed << 8) + header->protocol;
-  checksum += header->segment_length;
-  for (int i = 0; i < data_length; i += 2) {
-    uint16_t v = ((uint16_t)data[i] << 8) + data[i + 1];
-    checksum += v;
+uint16_t checksum(const char *data, size_t data_length) {
+  uint32_t sum = 0, i;
+  for (i = 0; i < data_length - 1; i += 2) {
+    uint16_t v = *(uint16_t *)&data[i];
+    sum += v;
   }
-  return ~checksum;
+
+  if (data_length & 1) {
+    uint16_t v = (uint8_t)data[i];
+    sum += v;
+  }
+
+  while (sum >> 16) {
+    sum = (sum & 0xFFFF) + (sum >> 16);
+  }
+
+  return ~sum;
 }
 
-void printTCPSegments(char *segments, size_t segmentCount) {
+void printTCPSegment(char *segment, size_t segment_size) {
   FILE *f;
   f = fopen("output.bin", "wb");
-  for (int i = 0; i < segmentCount; i++) {
-    char *currentSegment = segments + (i * max_segment_size);
+  char *currentSegment = segment;
 
-    struct tcpHeader *header = (struct tcpHeader *)currentSegment;
+  struct tcpHeader *header = (struct tcpHeader *)currentSegment;
 
-    printf("******************** SEGM %3d ********************\n", i);
-    printf("src_port   : %5d\n", ntohs(header->src_port));
-    printf("dst_port   : %5d\n", ntohs(header->dst_port));
-    printf("seq_num    : %5d\n", ntohl(header->seq_num));
-    printf("data_offset: %5d\n", header->data_offset);
-    printf("flags      |\n");
-    printf("           |- CWR: %d\n", header->CWR);
-    printf("           |- ECE: %d\n", header->ECE);
-    printf("           |- URG: %d\n", header->URG);
-    printf("           |- ACK: %d\n", header->ACK);
-    printf("           |- PSH: %d\n", header->PSH);
-    printf("           |- RST: %d\n", header->RST);
-    printf("           |- SYN: %d\n", header->SYN);
-    printf("           |- FIN: %d\n", header->FIN);
-    printf("window     : %d\n", ntohs(header->window));
-    printf("checksum   : 0x%4x\n", ntohs(header->checksum));
-    printf("urgent_ptr : %d\n", ntohs(header->urgent_ptr));
-    printf("data       :\n\t");
+  printf("******************** SEGM ********************\n");
+  printf("src_port   : %5d\n", ntohs(header->src_port));
+  printf("dst_port   : %5d\n", ntohs(header->dst_port));
+  printf("seq_num    : %5d\n", ntohl(header->seq_num));
+  printf("data_offset: %5d\n", header->data_offset);
+  printf("flags      |\n");
+  printf("           |- CWR: %d\n", header->CWR);
+  printf("           |- ECE: %d\n", header->ECE);
+  printf("           |- URG: %d\n", header->URG);
+  printf("           |- ACK: %d\n", header->ACK);
+  printf("           |- PSH: %d\n", header->PSH);
+  printf("           |- RST: %d\n", header->RST);
+  printf("           |- SYN: %d\n", header->SYN);
+  printf("           |- FIN: %d\n", header->FIN);
+  printf("window     : %d\n", ntohs(header->window));
+  printf("checksum   : 0x%4x\n", ntohs(header->checksum));
+  printf("urgent_ptr : %d\n", ntohs(header->urgent_ptr));
+  printf("data       :\n\t");
 
-    print_hex((uint8_t *)currentSegment + sizeof(struct tcpHeader),
-              max_data_size, "\t");
-    printf("RAW\n");
-    print_hex((uint8_t *)currentSegment, max_segment_size, "");
+  print_hex((uint8_t *)currentSegment + sizeof(struct tcpHeader), max_data_size,
+            "\t");
+  printf("RAW\n");
+  print_hex((uint8_t *)currentSegment, max_segment_size, "");
 
-    printf("******************** SEGM %3d ********************\n", i);
-  }
-  fwrite(segments, segmentCount * max_segment_size, 1, f);
+  printf("******************** SEGM ********************\n");
+  fwrite(segment, segment_size, 1, f);
   fclose(f);
 }
 
 char *createTCPSegments(const char *data, size_t data_length,
-                        size_t *segmentCount, struct sockaddr *dstAddr) {
-  *segmentCount = data_length / max_data_size + 1;
+                        size_t *segment_size, struct sockaddr *dstAddr) {
+  // *segmentCount = data_length / max_data_size + 1;
+  char *segment = calloc(data_length + sizeof(struct tcpHeader), sizeof(char));
+  *segment_size = data_length + sizeof(struct tcpHeader);
 
-  char *segments = malloc(*segmentCount * max_segment_size);
+  struct tcpHeader *header = (struct tcpHeader *)segment;
+  char *data_loc = segment + sizeof(struct tcpHeader);
 
-  memset(segments, 0, *segmentCount * max_segment_size);
+  memcpy(data_loc, data, data_length);
 
   struct pseudoHeader ipHeader;
   ipHeader.src_ip = src_ip;
   ipHeader.dst_ip = ((struct sockaddr_in *)dstAddr)->sin_addr.s_addr;
+  ipHeader.fixed = 0;
   ipHeader.protocol = IPPROTO_TCP;
-  ipHeader.segment_length = max_segment_size;
+  ipHeader.segment_length = htons(data_length + sizeof(struct tcpHeader));
 
-  struct tcpHeader header;
-  memset(&header, 0, sizeof(header));
+  header->src_port = htons(port_number);
+  header->dst_port = ((struct sockaddr_in *)dstAddr)->sin_port;
+  header->data_offset = 5;
+  header->window = htons(5840);
+  header->seq_num = htonl(0);
+  header->FIN = 1;
+  header->checksum = 0;
 
-  header.src_port = htons(port_number);
-  header.dst_port = ((struct sockaddr_in *)dstAddr)->sin_port;
-  header.data_offset = 5;
-  header.window = htons(5840);
+  size_t pseudogram_size =
+      sizeof(struct pseudoHeader) + sizeof(struct tcpHeader) + data_length;
+  char *pseudogram = calloc(pseudogram_size, sizeof(char));
 
-  for (int i = 0; i < *segmentCount; i++) {
-    const char *data_pos = data + (i * max_data_size);
-    char *segment = segments + i * max_segment_size;
+  memcpy(pseudogram, (char *)&ipHeader, sizeof(struct pseudoHeader));
 
-    int length = max_data_size;
-    if ((data_pos + length) > (data + data_length)) {
-      length = (data + data_length) - (data_pos);
-    }
-
-    memcpy(segment + sizeof(struct tcpHeader), data, length);
-
-    // header.seq_num = i * max_data_size;
-    header.seq_num = htonl(0);
-
-    header.PSH = 1;
-    // header.PSH = 1;
-    // if (i == 0) {
-    //   header.SYN = 1;
-    // } else {
-    //   header.SYN = 0;
-    // }
-
-    memcpy(segment, &header, sizeof(struct tcpHeader));
-    header.checksum = checksum(segment, max_segment_size, &ipHeader);
-    memcpy(segment, &header, sizeof(struct tcpHeader));
+  for (int i = 0; i < sizeof(struct tcpHeader) + data_length; i++) {
+    *(pseudogram + sizeof(struct pseudoHeader) + i) = segment[i];
   }
 
-  return segments;
+  header->checksum = checksum(pseudogram, pseudogram_size);
+
+  free(pseudogram);
+
+  return segment;
 }

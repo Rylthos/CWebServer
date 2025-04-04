@@ -53,8 +53,8 @@ struct tcpHeader {
 static const int max_segment_size = 536;
 static const int max_data_size = max_segment_size - sizeof(struct tcpHeader);
 
-void printTCPSegments(char *segments, size_t segmentCount);
+void printTCPSegment(char *segments, size_t segment_size);
 
 char *createTCPSegments(const char *data, size_t data_length,
-                        size_t *segmentCount, struct sockaddr *dstAddr);
+                        size_t *segment_size, struct sockaddr *dstAddr);
 #endif

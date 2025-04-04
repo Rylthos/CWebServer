@@ -98,18 +98,15 @@ void send_msg(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,
               const char *msg, size_t msgLength) {
   LOG_SEND("%.*s", (int)msgLength, msg);
 
-  size_t segmentCount = 0;
-  char *segments = createTCPSegments(msg, msgLength, &segmentCount, destAddr);
+  size_t size = 0;
+  char *segment = createTCPSegments(msg, msgLength, &size, destAddr);
 
-  printTCPSegments(segments, segmentCount);
+  printTCPSegment(segment, size);
 
   printf("Sending Segments\n");
-  for (int i = 0; i < segmentCount; i++) {
-    sendto(sendFD, segments + i * max_segment_size, max_segment_size, 0,
-           destAddr, addrLen);
-  }
+  sendto(sendFD, segment, size, 0, destAddr, addrLen);
 
-  free(segments);
+  free(segment);
 }
 
 void send_file(struct sockaddr *destAddr, socklen_t addrLen, int sendFD,

@@ -114,7 +114,6 @@ int main(int argc, char **argv) {
 
     LOG_RECV_HEADER_START;
     printIPPacket(buffer, packet_size);
-    printTCPSegment(buffer + sizeof(IPHeader), packet_size - sizeof(IPHeader));
     LOG_RECV_HEADER_END;
 
     getSeqAckPortIP(buffer, &seq_num, &ack_seq, &port_number, &ip);
@@ -168,11 +167,12 @@ int main(int argc, char **argv) {
         printf("Sent %d bytes. ACK\n", sent);
       }
 
-      uint8_t *offset_buffer = buffer + sizeof(TCPHeader) + sizeof(IPHeader);
-      int32_t buffer_size = packet_size - sizeof(TCPHeader) - sizeof(IPHeader);
+      uint8_t *data;
+      uint32_t data_size;
+      getTCPDataPacket(buffer, packet_size, &data, &data_size);
 
-      handle_msg(&addr, &clientAddr, ack_seq, new_seq_num, serverFD,
-                 offset_buffer, buffer_size);
+      handle_msg(&addr, &clientAddr, ack_seq, new_seq_num, serverFD, data,
+                 data_size);
 
       createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet,
                          &packet_size);
@@ -189,6 +189,8 @@ int main(int argc, char **argv) {
       break;
     }
     case FIN: {
+      printf("RECIEVED: FIN\n");
+
       uint8_t *packet;
       uint32_t packet_size;
 

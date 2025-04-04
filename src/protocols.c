@@ -52,8 +52,12 @@ void printIPPacket(const uint8_t *packet, size_t packet_size) {
          inet_ntoa(*(struct in_addr *)&header->src_addr));
   printf("Dst Addr        : %s\n",
          inet_ntoa(*(struct in_addr *)&header->dst_addr));
-  printf("RAW\n");
-  print_hex(packet, packet_size, "");
+
+  uint8_t *segment;
+  uint32_t segment_size;
+  getTCPSegment(packet, packet_size, &segment, &segment_size);
+
+  printTCPSegment(segment, segment_size);
   printf("********************  IP  ********************\n");
 }
 
@@ -80,12 +84,55 @@ void printTCPSegment(const uint8_t *segment, size_t segment_size) {
   printf("urgent_ptr : %d\n", ntohs(header->urgent_ptr));
   printf("data       :\n\t");
 
-  print_hex((uint8_t *)segment + sizeof(TCPHeader),
-            segment_size - sizeof(TCPHeader), "\t");
+  uint8_t *data;
+  uint32_t data_length;
+  getTCPDataSegment(segment, segment_size, &data, &data_length);
+  print_hex(data, data_length, "\t");
   printf("RAW\n");
   print_hex((uint8_t *)segment, segment_size, "");
 
   printf("******************** TCP ********************\n");
+}
+
+void getTCPSegment(const uint8_t *packet, size_t packet_size, uint8_t **segment,
+                   uint32_t *segment_size) {
+  IPHeader *ip_hdr = (IPHeader *)packet;
+  uint32_t ip_header_size = ip_hdr->IHL * 4;
+  TCPHeader *header = (TCPHeader *)(packet + ip_header_size);
+
+  if (segment != NULL) {
+    *segment = (uint8_t *)(packet + ip_header_size);
+  }
+
+  if (segment_size != NULL) {
+    *segment_size = packet_size - ip_header_size;
+  }
+}
+
+void getTCPDataPacket(const uint8_t *packet, size_t packet_size, uint8_t **data,
+                      uint32_t *data_size) {
+  uint8_t *segment;
+  uint32_t segment_size;
+  getTCPSegment(packet, packet_size, &segment, &segment_size);
+
+  if (data != NULL) {
+    *data = segment + sizeof(TCPHeader);
+  }
+
+  if (data_size != NULL) {
+    *data_size = segment_size - sizeof(TCPHeader);
+  }
+}
+
+void getTCPDataSegment(const uint8_t *segment, size_t segment_size,
+                       uint8_t **data, uint32_t *data_size) {
+  if (data != NULL) {
+    *data = (uint8_t *)segment + sizeof(TCPHeader);
+  }
+
+  if (data_size != NULL) {
+    *data_size = segment_size - sizeof(TCPHeader);
+  }
 }
 
 PacketType getTCPPacketType(uint8_t *packet) {

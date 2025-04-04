@@ -79,6 +79,15 @@ typedef enum packetType {
 void printIPPacket(const uint8_t *packet, size_t packet_size);
 void printTCPSegment(const uint8_t *segment, size_t segment_size);
 
+void getTCPSegment(const uint8_t *packet, size_t packet_size, uint8_t **segment,
+                   uint32_t *segment_size);
+
+void getTCPDataPacket(const uint8_t *packet, size_t packet_size, uint8_t **data,
+                      uint32_t *data_size);
+
+void getTCPDataSegment(const uint8_t *segment, size_t segment_size,
+                       uint8_t **data, uint32_t *data_size);
+
 PacketType getTCPPacketType(uint8_t *packet);
 
 void createGenericPacket(struct sockaddr_in *src_addr,

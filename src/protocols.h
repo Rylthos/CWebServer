@@ -7,7 +7,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-#define DATAGRAM_SIZE 4096
+#define MAX_DATAGRAM_SIZE 512
 
 extern uint32_t src_ip;
 extern int port_number;
@@ -34,6 +34,17 @@ typedef struct ipHeader {
   uint32_t dst_addr;
 } IPHeader;
 
+typedef struct tcpFlags {
+  uint8_t FIN : 1;
+  uint8_t SYN : 1;
+  uint8_t RST : 1;
+  uint8_t PSH : 1;
+  uint8_t ACK : 1;
+  uint8_t URG : 1;
+  uint8_t ECE : 1;
+  uint8_t CWR : 1;
+} TCPFlags;
+
 typedef struct tcpHeader {
   uint16_t src_port;
   uint16_t dst_port;
@@ -48,19 +59,7 @@ typedef struct tcpHeader {
     };
   };
 
-  union {
-    uint8_t flags;
-    struct {
-      uint8_t FIN : 1;
-      uint8_t SYN : 1;
-      uint8_t RST : 1;
-      uint8_t PSH : 1;
-      uint8_t ACK : 1;
-      uint8_t URG : 1;
-      uint8_t ECE : 1;
-      uint8_t CWR : 1;
-    };
-  };
+  TCPFlags flags;
 
   uint16_t window;
   uint16_t checksum;
@@ -81,6 +80,12 @@ void printIPPacket(const uint8_t *packet, size_t packet_size);
 void printTCPSegment(const uint8_t *segment, size_t segment_size);
 
 PacketType getTCPPacketType(uint8_t *packet);
+
+void createGenericPacket(struct sockaddr_in *src_addr,
+                         struct sockaddr_in *dst_addr, int32_t seq_num,
+                         int32_t ack_seq, uint8_t *data, uint32_t data_length,
+                         uint8_t **packet, uint32_t *packet_len,
+                         TCPFlags flags);
 
 void createSynAckPacket(struct sockaddr_in *src_addr,
                         struct sockaddr_in *dst_addr, int32_t seq_num,

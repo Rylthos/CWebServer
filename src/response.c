@@ -2,6 +2,7 @@
 #include "log.h"
 #include "protocols.h"
 
+#include <errno.h>
 #include <netinet/in.h>
 #include <regex.h>
 #include <stdio.h>
@@ -98,24 +99,36 @@ void send_msg(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,
               ssize_t buf_length) {
   LOG_SEND("%.*s", (int)buf_length, buf);
 
-  uint32_t packet_size;
-  uint8_t *packet;
-  createDataPacket(srcAddr, destAddr, seq_num, ack_seq, buf, buf_length,
-                   &packet, &packet_size);
+  int max_buf_size = MAX_DATAGRAM_SIZE - sizeof(TCPHeader) - sizeof(IPHeader);
 
-  int sent = sendto(serverFD, packet, packet_size, 0,
-                    (struct sockaddr *)destAddr, sizeof(*destAddr));
+  for (int i = 0; i < buf_length; i += max_buf_size) {
+    uint8_t *current_buf_pos = buf + i;
+    uint32_t buf_size = buf_length - i;
+    if (buf_size > max_buf_size) {
+      buf_size = max_buf_size;
+    }
 
-  if (sent == -1) {
-    fprintf(stderr, "Failed to send msg\n");
-  } else {
-    printf("Sent %d bytes\n", sent);
+    uint32_t packet_size;
+    uint8_t *packet;
+    createDataPacket(srcAddr, destAddr, seq_num + i, ack_seq, current_buf_pos,
+                     buf_size, &packet, &packet_size);
+
+    int sent = sendto(serverFD, packet, packet_size, 0,
+                      (struct sockaddr *)destAddr, sizeof(*destAddr));
+
+    if (sent == -1) {
+      fprintf(stderr, "Failed to send msg: %d\n", errno);
+    } else {
+      printf("Sent %d bytes\n", sent);
+    }
+
+    LOG_SEND_HEADER_START;
+    printIPPacket(packet, packet_size);
+    printTCPSegment(packet + sizeof(IPHeader), packet_size - sizeof(IPHeader));
+    LOG_SEND_HEADER_END;
+
+    free(packet);
   }
-
-  LOG_SEND_HEADER_START;
-  printIPPacket(packet, packet_size);
-  printTCPSegment(packet + sizeof(IPHeader), packet_size - sizeof(IPHeader));
-  LOG_SEND_HEADER_END;
 }
 
 void send_file(struct sockaddr_in *srcAddr, struct sockaddr_in *destAddr,

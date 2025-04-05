@@ -3,3 +3,4 @@ web
 .envrc
 .direnv/*
 output.bin
+.clang-format

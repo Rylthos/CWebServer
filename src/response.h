@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <sys/socket.h>
 
-extern void setup(char* sourceLoc);
+extern void setup_response(const char* sourceLoc);
 extern void cleanup();
 
 void handle_msg(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int seq_num, int ack_seq,

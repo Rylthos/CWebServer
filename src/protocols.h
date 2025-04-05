@@ -79,6 +79,11 @@ typedef enum packetType {
 void printIPPacket(const uint8_t* packet, size_t packet_size);
 void printTCPSegment(const uint8_t* segment, size_t segment_size);
 
+IPHeader* getIPHeader(const uint8_t* packet);
+TCPHeader* getTCPHeader(const uint8_t* packet);
+
+uint32_t getTCPLength(const uint8_t* packet, size_t packet_size);
+
 void getTCPSegment(
     const uint8_t* packet, size_t packet_size, uint8_t** segment, uint32_t* segment_size);
 

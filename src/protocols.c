@@ -95,12 +95,22 @@ void printTCPSegment(const uint8_t* segment, size_t segment_size)
     printf("******************** TCP ********************\n");
 }
 
+IPHeader* getIPHeader(const uint8_t* packet) { return (IPHeader*)packet; }
+
+TCPHeader* getTCPHeader(const uint8_t* packet) { return (TCPHeader*)(packet + sizeof(IPHeader)); }
+
+uint32_t getTCPLength(const uint8_t* packet, size_t packet_size)
+{
+    uint32_t length;
+    getTCPDataPacket(packet, packet_size, NULL, &length);
+    return length;
+}
+
 void getTCPSegment(
     const uint8_t* packet, size_t packet_size, uint8_t** segment, uint32_t* segment_size)
 {
-    IPHeader* ip_hdr = (IPHeader*)packet;
+    IPHeader* ip_hdr        = (IPHeader*)packet;
     uint32_t ip_header_size = ip_hdr->IHL * 4;
-    TCPHeader* header = (TCPHeader*)(packet + ip_header_size);
 
     if (segment != NULL) {
         *segment = (uint8_t*)(packet + ip_header_size);
@@ -163,7 +173,7 @@ void createGenericPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_a
     size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader) + data_length;
     uint8_t* datagram = calloc(total_size, sizeof(uint8_t));
 
-    IPHeader* ipHeader = (IPHeader*)datagram;
+    IPHeader* ipHeader   = (IPHeader*)datagram;
     TCPHeader* tcpHeader = (TCPHeader*)(datagram + sizeof(IPHeader));
     PseudoIPHeader pseudoHeader;
 
@@ -172,44 +182,44 @@ void createGenericPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_a
         memcpy(payload, data, data_length);
     }
 
-    ipHeader->IHL = 5;
-    ipHeader->version = 4;
-    ipHeader->tos = 0;
-    ipHeader->total_length = total_size;
-    ipHeader->id = htonl(rand() % 65535);
+    ipHeader->IHL             = 5;
+    ipHeader->version         = 4;
+    ipHeader->tos             = 0;
+    ipHeader->total_length    = total_size;
+    ipHeader->id              = htonl(rand() % 65535);
     ipHeader->fragment_offset = 0;
-    ipHeader->ttl = 64;
-    ipHeader->protocol = IPPROTO_TCP;
-    ipHeader->checksum = 0;
-    ipHeader->src_addr = src_addr->sin_addr.s_addr;
-    ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
+    ipHeader->ttl             = 64;
+    ipHeader->protocol        = IPPROTO_TCP;
+    ipHeader->checksum        = 0;
+    ipHeader->src_addr        = src_addr->sin_addr.s_addr;
+    ipHeader->dst_addr        = dst_addr->sin_addr.s_addr;
 
-    tcpHeader->src_port = src_addr->sin_port;
-    tcpHeader->dst_port = dst_addr->sin_port;
-    tcpHeader->seq_num = htonl(seq_num);
-    tcpHeader->ack_num = htonl(ack_seq);
+    tcpHeader->src_port    = src_addr->sin_port;
+    tcpHeader->dst_port    = dst_addr->sin_port;
+    tcpHeader->seq_num     = htonl(seq_num);
+    tcpHeader->ack_num     = htonl(ack_seq);
     tcpHeader->data_offset = 5;
-    tcpHeader->flags = flags;
-    tcpHeader->checksum = 0;
-    tcpHeader->window = htons(5840);
-    tcpHeader->urgent_ptr = 0;
+    tcpHeader->flags       = flags;
+    tcpHeader->checksum    = 0;
+    tcpHeader->window      = htons(5840);
+    tcpHeader->urgent_ptr  = 0;
 
-    pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
-    pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
-    pseudoHeader.fixed = 0;
-    pseudoHeader.protocol = IPPROTO_TCP;
+    pseudoHeader.src_ip         = src_addr->sin_addr.s_addr;
+    pseudoHeader.dst_ip         = dst_addr->sin_addr.s_addr;
+    pseudoHeader.fixed          = 0;
+    pseudoHeader.protocol       = IPPROTO_TCP;
     pseudoHeader.segment_length = htons(sizeof(TCPHeader) + data_length);
 
     size_t pseudogram_size = sizeof(PseudoIPHeader) + sizeof(TCPHeader) + data_length;
-    uint8_t* pseudogram = malloc(pseudogram_size);
+    uint8_t* pseudogram    = malloc(pseudogram_size);
 
     memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
     memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader, sizeof(TCPHeader) + data_length);
 
     tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
-    ipHeader->checksum = checksum(datagram, total_size);
+    ipHeader->checksum  = checksum(datagram, total_size);
 
-    *packet = datagram;
+    *packet     = datagram;
     *packet_len = total_size;
 
     free(pseudogram);

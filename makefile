@@ -1,4 +1,4 @@
-flags = -g -Wall -Wpedantic -O1
+flags = -g -Wall -Wpedantic -O0 -MD
 
 objFolder := build
 srcFolder := src
@@ -24,3 +24,5 @@ $(OBJS): | $(objFolder)
 $(OBJS): $(objFolder)/%.o: $(srcFolder)/%.c
 	@echo Building $<
 	gcc $(flags) -c $< -o $@
+
+-include $(OBJS:.o=.d)

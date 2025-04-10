@@ -41,17 +41,19 @@ void printIPPacket(const uint8_t* packet, size_t packet_size)
     IPHeader* header = (IPHeader*)packet;
 
     printf("********************  IP  ********************\n");
-    printf("Version         : %d\n", header->version);
-    printf("IHL             : %d\n", header->IHL);
-    printf("TOS             : %d\n", header->tos);
-    printf("Total Length    : %u\n", ntohs(header->total_length));
-    printf("ID              : %u\n", ntohs(header->id));
-    printf("Fragment Offset : %d\n", ntohs(header->fragment_offset));
-    printf("TTL             : %d\n", header->ttl);
-    printf("Protocol        : %d\n", header->protocol);
-    printf("Checksum        : 0x%04x\n", header->checksum);
-    printf("Src Addr        : %s\n", inet_ntoa(*(struct in_addr*)&header->src_addr));
-    printf("Dst Addr        : %s\n", inet_ntoa(*(struct in_addr*)&header->dst_addr));
+    printf("version         : %d\n", header->version);
+    printf("ihl             : %d\n", header->IHL);
+    printf("tos             : %d\n", header->tos);
+    printf("total length    : %u\n", ntohs(header->total_length));
+    printf("id              : %u\n", ntohs(header->id));
+    printf("fragment offset : %d\n", ntohs(header->fragment_offset));
+    printf("ttl             : %d\n", header->ttl);
+    printf("protocol        : %d\n", header->protocol);
+    printf("checksum        : 0x%04x\n", header->checksum);
+    printf("src addr        : %s\n", inet_ntoa(*(struct in_addr*)&header->src_addr));
+    printf("dst addr        : %s\n", inet_ntoa(*(struct in_addr*)&header->dst_addr));
+    printf("RAW HEADER\n\t");
+    print_hex(packet, sizeof(IPHeader), "\t");
 
     uint8_t* segment;
     uint32_t segment_size;
@@ -89,7 +91,7 @@ void printTCPSegment(const uint8_t* segment, size_t segment_size)
     uint32_t data_length;
     getTCPDataSegment(segment, segment_size, &data, &data_length);
     print_hex(data, data_length, "\t");
-    printf("RAW\n");
+    printf("RAW SEGMENT\n");
     print_hex((uint8_t*)segment, segment_size, "");
 
     printf("******************** TCP ********************\n");
@@ -109,7 +111,7 @@ uint32_t getTCPLength(const uint8_t* packet, size_t packet_size)
 void getTCPSegment(
     const uint8_t* packet, size_t packet_size, uint8_t** segment, uint32_t* segment_size)
 {
-    IPHeader* ip_hdr        = (IPHeader*)packet;
+    IPHeader* ip_hdr = (IPHeader*)packet;
     uint32_t ip_header_size = ip_hdr->IHL * 4;
 
     if (segment != NULL) {
@@ -173,7 +175,7 @@ void createGenericPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_a
     size_t total_size = sizeof(IPHeader) + sizeof(TCPHeader) + data_length;
     uint8_t* datagram = calloc(total_size, sizeof(uint8_t));
 
-    IPHeader* ipHeader   = (IPHeader*)datagram;
+    IPHeader* ipHeader = (IPHeader*)datagram;
     TCPHeader* tcpHeader = (TCPHeader*)(datagram + sizeof(IPHeader));
     PseudoIPHeader pseudoHeader;
 
@@ -182,44 +184,44 @@ void createGenericPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_a
         memcpy(payload, data, data_length);
     }
 
-    ipHeader->IHL             = 5;
-    ipHeader->version         = 4;
-    ipHeader->tos             = 0;
-    ipHeader->total_length    = total_size;
-    ipHeader->id              = htonl(rand() % 65535);
+    ipHeader->IHL = 5;
+    ipHeader->version = 4;
+    ipHeader->tos = 0;
+    ipHeader->total_length = htons(total_size);
+    ipHeader->id = htonl(rand() % 65535);
     ipHeader->fragment_offset = 0;
-    ipHeader->ttl             = 64;
-    ipHeader->protocol        = IPPROTO_TCP;
-    ipHeader->checksum        = 0;
-    ipHeader->src_addr        = src_addr->sin_addr.s_addr;
-    ipHeader->dst_addr        = dst_addr->sin_addr.s_addr;
+    ipHeader->ttl = 64;
+    ipHeader->protocol = IPPROTO_TCP;
+    ipHeader->checksum = 0;
+    ipHeader->src_addr = src_addr->sin_addr.s_addr;
+    ipHeader->dst_addr = dst_addr->sin_addr.s_addr;
 
-    tcpHeader->src_port    = src_addr->sin_port;
-    tcpHeader->dst_port    = dst_addr->sin_port;
-    tcpHeader->seq_num     = htonl(seq_num);
-    tcpHeader->ack_num     = htonl(ack_seq);
+    tcpHeader->src_port = src_addr->sin_port;
+    tcpHeader->dst_port = dst_addr->sin_port;
+    tcpHeader->seq_num = htonl(seq_num);
+    tcpHeader->ack_num = htonl(ack_seq);
     tcpHeader->data_offset = 5;
-    tcpHeader->flags       = flags;
-    tcpHeader->checksum    = 0;
-    tcpHeader->window      = htons(5840);
-    tcpHeader->urgent_ptr  = 0;
+    tcpHeader->flags = flags;
+    tcpHeader->checksum = 0;
+    tcpHeader->window = htons(5840);
+    tcpHeader->urgent_ptr = 0;
 
-    pseudoHeader.src_ip         = src_addr->sin_addr.s_addr;
-    pseudoHeader.dst_ip         = dst_addr->sin_addr.s_addr;
-    pseudoHeader.fixed          = 0;
-    pseudoHeader.protocol       = IPPROTO_TCP;
+    pseudoHeader.src_ip = src_addr->sin_addr.s_addr;
+    pseudoHeader.dst_ip = dst_addr->sin_addr.s_addr;
+    pseudoHeader.fixed = 0;
+    pseudoHeader.protocol = IPPROTO_TCP;
     pseudoHeader.segment_length = htons(sizeof(TCPHeader) + data_length);
 
     size_t pseudogram_size = sizeof(PseudoIPHeader) + sizeof(TCPHeader) + data_length;
-    uint8_t* pseudogram    = malloc(pseudogram_size);
+    uint8_t* pseudogram = malloc(pseudogram_size);
 
     memcpy(pseudogram, &pseudoHeader, sizeof(PseudoIPHeader));
     memcpy(pseudogram + sizeof(PseudoIPHeader), tcpHeader, sizeof(TCPHeader) + data_length);
 
     tcpHeader->checksum = checksum(pseudogram, pseudogram_size);
-    ipHeader->checksum  = checksum(datagram, total_size);
+    ipHeader->checksum = checksum(datagram, total_size);
 
-    *packet     = datagram;
+    *packet = datagram;
     *packet_len = total_size;
 
     free(pseudogram);

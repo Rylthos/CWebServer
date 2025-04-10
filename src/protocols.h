@@ -12,7 +12,7 @@
 extern uint32_t src_ip;
 extern int port_number;
 
-typedef struct pseudoIpHeader {
+typedef struct _PseudoIpHeader {
     uint32_t src_ip;
     uint32_t dst_ip;
     uint8_t fixed;
@@ -20,7 +20,7 @@ typedef struct pseudoIpHeader {
     uint16_t segment_length;
 } PseudoIPHeader;
 
-typedef struct ipHeader {
+typedef struct _IPHeader {
     uint8_t IHL : 4;
     uint8_t version : 4;
     uint8_t tos;
@@ -34,7 +34,7 @@ typedef struct ipHeader {
     uint32_t dst_addr;
 } IPHeader;
 
-typedef struct tcpFlags {
+typedef struct _TCPFlags {
     uint8_t FIN : 1;
     uint8_t SYN : 1;
     uint8_t RST : 1;
@@ -45,7 +45,7 @@ typedef struct tcpFlags {
     uint8_t CWR : 1;
 } TCPFlags;
 
-typedef struct tcpHeader {
+typedef struct _TCPHeader {
     uint16_t src_port;
     uint16_t dst_port;
     uint32_t seq_num;
@@ -68,7 +68,7 @@ typedef struct tcpHeader {
 
 uint16_t checksum(const uint8_t* data, size_t data_length);
 
-typedef enum packetType {
+typedef enum _PacketType {
     NONE,
     ACK,
     SYN,

@@ -14,13 +14,13 @@
 #include <sys/socket.h>
 
 // Response Headers
-static const char* errorString      = "HTTP/1.1 404 Not Found\n";
+static const char* errorString = "HTTP/1.1 404 Not Found\n";
 static const char* htmlHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/html\n\n";
-static const char* pngHeaderString  = "HTTP/1.1 200 OK\nContent-Type: images/png\n\n";
-static const char* jpgHeaderString  = "HTTP/1.1 200 OK\nContent-Type: images/jpeg\n\n";
-static const char* svgHeaderString  = "HTTP/1.1 200 OK\nContent-Type: image/svg+xml\n\n";
-static const char* cssHeaderString  = "HTTP/1.1 200 OK\nContent-Type: text/css\n\n";
-static const char* jsHeaderString   = "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n";
+static const char* pngHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/png\n\n";
+static const char* jpgHeaderString = "HTTP/1.1 200 OK\nContent-Type: images/jpeg\n\n";
+static const char* svgHeaderString = "HTTP/1.1 200 OK\nContent-Type: image/svg+xml\n\n";
+static const char* cssHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/css\n\n";
+static const char* jsHeaderString = "HTTP/1.1 200 OK\nContent-Type: text/javascript\n\n";
 
 static regex_t s_GetRegex;
 static const char* s_SourceLoc;
@@ -45,10 +45,7 @@ int parse_file_ext(char* filename, size_t length, char** fileBuf, const char*** 
         sprintf(*fileBuf, "%s/index.html", s_SourceLoc);
         *header = &htmlHeaderString;
     } else {
-        sprintf(*fileBuf,
-            "%s/%.*s",
-            s_SourceLoc,
-            (int)length - 1,
+        sprintf(*fileBuf, "%s/%.*s", s_SourceLoc, (int)length - 1,
             filename + 1); // Remove preceeding '/'
         switch (filename[length - 1]) {
         case 'l': // HTML
@@ -99,21 +96,15 @@ void send_msg(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int seq
 
     for (int i = 0; i < buf_length; i += max_buf_size) {
         uint8_t* current_buf_pos = buf + i;
-        uint32_t buf_size        = buf_length - i;
+        uint32_t buf_size = buf_length - i;
         if (buf_size > max_buf_size) {
             buf_size = max_buf_size;
         }
 
         uint32_t packet_size;
         uint8_t* packet;
-        createDataPacket(srcAddr,
-            destAddr,
-            seq_num + i,
-            ack_seq,
-            current_buf_pos,
-            buf_size,
-            &packet,
-            &packet_size);
+        createDataPacket(srcAddr, destAddr, seq_num + i, ack_seq, current_buf_pos, buf_size,
+            &packet, &packet_size);
 
         int sent = sendto(
             serverFD, packet, packet_size, 0, (struct sockaddr*)destAddr, sizeof(*destAddr));
@@ -121,11 +112,7 @@ void send_msg(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int seq
         if (sent == -1) {
             LOG_ERROR("Failed to send msg: %d\n", errno);
         } else {
-            SENT_MSG("PSH",
-                *srcAddr,
-                *destAddr,
-                seq_num + i,
-                ack_seq,
+            SENT_MSG("PSH", *srcAddr, *destAddr, seq_num + i, ack_seq,
                 getTCPLength(packet, packet_size));
         }
 
@@ -156,12 +143,7 @@ void send_file(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int se
     if (file == NULL) {
         LOG_ERROR("File doesnt exist: %.*s\n", (int)length, filename);
 
-        send_msg(srcAddr,
-            destAddr,
-            seq_num,
-            ack_seq,
-            serverFD,
-            (uint8_t*)errorString,
+        send_msg(srcAddr, destAddr, seq_num, ack_seq, serverFD, (uint8_t*)errorString,
             strlen(errorString));
 
         return;
@@ -197,15 +179,10 @@ void handle_msg(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int s
     int serverFD, uint8_t* buf, ssize_t buf_length)
 {
     regmatch_t* match = malloc((s_GetRegex.re_nsub + 1) * sizeof(regmatch_t));
-    int retV          = regexec(&s_GetRegex, (char*)buf, s_GetRegex.re_nsub + 1, match, 0);
+    int retV = regexec(&s_GetRegex, (char*)buf, s_GetRegex.re_nsub + 1, match, 0);
 
     if (!retV) { // handle get Request
-        handle_get(srcAddr,
-            destAddr,
-            seq_num,
-            ack_seq,
-            serverFD,
-            buf + match[1].rm_so,
+        handle_get(srcAddr, destAddr, seq_num, ack_seq, serverFD, buf + match[1].rm_so,
             match[1].rm_eo - match[1].rm_so);
     } else {
         LOG_ERROR("Unknown request:\n%.*s\n", (int)buf_length, buf);

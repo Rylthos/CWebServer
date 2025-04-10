@@ -11,9 +11,11 @@
 #include "log.h"
 #include "protocols.h"
 #include "response.h"
+#include "tcp_connection_table.h"
 
-const char* info_str
-    = "Incorrect Usage: web <addr> <port> <folder> [-l]\n\t-l: Enable indepth logging\n";
+const char* info_str = "Incorrect Usage: web <addr> <port> <folder> [-l][-t]\n"
+                       "\t-l: Enable indepth logging\n"
+                       "\t-t: Enable logging of current tcp connections\n";
 
 typedef struct cliArguments {
     // REQUIRED
@@ -23,6 +25,7 @@ typedef struct cliArguments {
 
     // OPTIONAL
     int enable_log;
+    int enable_tcp_log;
 } CLIArguments;
 
 int serverFD;
@@ -37,13 +40,16 @@ CLIArguments parseCLI(int argc, char** argv)
         exit(-1);
     }
 
-    arguments.ip           = argv[1];
-    arguments.port         = atoi(argv[2]);
+    arguments.ip = argv[1];
+    arguments.port = atoi(argv[2]);
     arguments.resource_loc = &argv[3];
 
     for (int i = 4; i < argc; i++) {
         if (strcmp(argv[i], "-l") == 0) {
             arguments.enable_log = 1;
+        }
+        if (strcmp(argv[i], "-t") == 0) {
+            arguments.enable_tcp_log = 1;
         }
     }
 
@@ -71,8 +77,8 @@ void getSeqAckPortIP(
 {
     *seq_num = ntohl(getTCPHeader(buffer)->seq_num);
     *ack_seq = ntohl(getTCPHeader(buffer)->ack_num);
-    *port    = getTCPHeader(buffer)->src_port;
-    *ip      = getIPHeader(buffer)->src_addr;
+    *port = getTCPHeader(buffer)->src_port;
+    *ip = getIPHeader(buffer)->src_addr;
 }
 
 int main(int argc, char** argv)
@@ -89,7 +95,7 @@ int main(int argc, char** argv)
     }
     GENERAL("Created send socket: %d\n", serverFD);
 
-    int one        = 1;
+    int one = 1;
     const int* val = &one;
     if (setsockopt(serverFD, IPPROTO_IP, IP_HDRINCL, val, sizeof(one)) == -1) {
         ERROR("Setsockopt failed\n");
@@ -98,8 +104,8 @@ int main(int argc, char** argv)
     }
 
     struct sockaddr_in addr = {
-        .sin_family      = AF_INET,
-        .sin_port        = htons(args.port),
+        .sin_family = AF_INET,
+        .sin_port = htons(args.port),
         .sin_addr.s_addr = inet_addr(args.ip),
     };
 
@@ -118,8 +124,14 @@ int main(int argc, char** argv)
         enable_log = 1;
     }
 
-    size_t readBufLength   = 500;
-    char* readBuf          = malloc(readBufLength + 1);
+    if (args.enable_tcp_log) {
+        GENERAL("Enabled tcp status logging\n");
+    }
+
+    init_tcp_table();
+
+    size_t readBufLength = 500;
+    char* readBuf = malloc(readBufLength + 1);
     readBuf[readBufLength] = 0;
 
     struct sockaddr_in clientAddr;
@@ -146,9 +158,13 @@ int main(int argc, char** argv)
 
         getSeqAckPortIP(buffer, &seq_num, &ack_seq, &port_number, &ip);
 
-        clientAddr.sin_family      = AF_INET;
-        clientAddr.sin_port        = port_number;
+        clientAddr.sin_family = AF_INET;
+        clientAddr.sin_port = port_number;
         clientAddr.sin_addr.s_addr = ip;
+
+        if (ip == addr.sin_addr.s_addr && port_number == addr.sin_port) {
+            continue;
+        }
 
         PacketType type = getTCPPacketType(buffer);
 
@@ -157,27 +173,24 @@ int main(int argc, char** argv)
         {
             RECV_MSG("SYN", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
 
+            if (get_tcp_status(ip, port_number) == Active) {
+                GENERAL("Port already in use\n");
+                continue;
+            }
+
             uint8_t* packet;
             uint32_t packet_size;
 
             int new_seq_num = seq_num + 1;
             createSynAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            int sent = sendto(serverFD,
-                packet,
-                packet_size,
-                0,
-                (struct sockaddr*)&clientAddr,
+            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
                 LOG_ERROR("Failed to send bytes\n");
             } else {
-                SENT_MSG("SYN ACK",
-                    addr,
-                    clientAddr,
-                    ack_seq,
-                    new_seq_num,
+                SENT_MSG("SYN ACK", addr, clientAddr, ack_seq, new_seq_num,
                     getTCPLength(packet, packet_size));
             }
 
@@ -187,10 +200,17 @@ int main(int argc, char** argv)
             });
             free(packet);
 
+            start_connection(ip, port_number);
+
             break;
         }
         case PSH: {
             RECV_MSG("PSH", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
+
+            if (get_tcp_status(ip, port_number) == Disconnected) {
+                GENERAL("Port not connected\n");
+                continue;
+            }
 
             uint8_t* packet;
             uint32_t packet_size;
@@ -198,21 +218,13 @@ int main(int argc, char** argv)
             int new_seq_num = seq_num + 1;
             createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            int sent = sendto(serverFD,
-                packet,
-                packet_size,
-                0,
-                (struct sockaddr*)&clientAddr,
+            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
                 printf("Failed to send bytes\n");
             } else {
-                SENT_MSG("ACK",
-                    addr,
-                    clientAddr,
-                    ack_seq,
-                    new_seq_num,
+                SENT_MSG("ACK", addr, clientAddr, ack_seq, new_seq_num,
                     getTCPLength(packet, packet_size));
             }
 
@@ -230,21 +242,13 @@ int main(int argc, char** argv)
 
             createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            sent = sendto(serverFD,
-                packet,
-                packet_size,
-                0,
-                (struct sockaddr*)&clientAddr,
+            sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
                 printf("Failed to send bytes\n");
             } else {
-                SENT_MSG("FIN ACK",
-                    addr,
-                    clientAddr,
-                    ack_seq,
-                    new_seq_num,
+                SENT_MSG("FIN", addr, clientAddr, ack_seq, new_seq_num,
                     getTCPLength(packet, packet_size));
             }
 
@@ -254,10 +258,17 @@ int main(int argc, char** argv)
             });
             free(packet);
 
+            change_tcp_connection(ip, port_number, Finish);
+
             break;
         }
         case FIN: {
             RECV_MSG("FIN", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
+
+            if (get_tcp_status(ip, port_number) != Active) {
+                GENERAL("Port not connected\n");
+                continue;
+            }
 
             uint8_t* packet;
             uint32_t packet_size;
@@ -265,15 +276,14 @@ int main(int argc, char** argv)
             int new_seq_num = seq_num + 1;
             createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            int sent = sendto(serverFD,
-                packet,
-                packet_size,
-                0,
-                (struct sockaddr*)&clientAddr,
+            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
                 printf("Failed to send bytes\n");
+            } else {
+                SENT_MSG("ACK", addr, clientAddr, ack_seq, new_seq_num,
+                    getTCPLength(packet, packet_size));
             }
 
             LOG_SEND({
@@ -284,21 +294,13 @@ int main(int argc, char** argv)
 
             createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            sent = sendto(serverFD,
-                packet,
-                packet_size,
-                0,
-                (struct sockaddr*)&clientAddr,
+            sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
                 printf("Failed to send bytes\n");
             } else {
-                SENT_MSG("FIN ACK",
-                    addr,
-                    clientAddr,
-                    ack_seq,
-                    new_seq_num,
+                SENT_MSG("FIN ACK", addr, clientAddr, ack_seq, new_seq_num,
                     getTCPLength(packet, packet_size));
             }
 
@@ -308,13 +310,29 @@ int main(int argc, char** argv)
             });
 
             free(packet);
+
+            end_connection(ip, port_number);
+            GENERAL("Closed connection\n");
+
             break;
         }
         case ACK:
             RECV_MSG("ACK", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
+
+            if (get_tcp_status(ip, port_number) == Finish) {
+                // end_connection(ip, port_number); // Browser still sending requests after
+                // GENERAL("Closed connection\n");
+            }
+
             break;
         default:
             LOG_ERROR("Unhandled type");
+            break;
+        }
+
+        if (args.enable_tcp_log) {
+            GENERAL("ENTRIES: %d/%d\n", _Table.element_count, _Table.current_size);
+            print_connections();
         }
     }
 

@@ -1,4 +1,4 @@
-flags = -g -Wall -Wpedantic -O0 -MD
+flags = -g -Wall -Wpedantic -O1 -MD
 
 objFolder := build
 srcFolder := src

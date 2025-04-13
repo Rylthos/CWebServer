@@ -288,3 +288,18 @@ void createFinAckPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_ad
 
     createGenericPacket(src_addr, dst_addr, seq_num, ack_seq, NULL, 0, packet, packet_len, flags);
 }
+
+void createRstPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_addr, int32_t seq_num,
+    int32_t ack_seq, uint8_t** packet, uint32_t* packet_len)
+{
+    TCPFlags flags = {
+        .FIN = 0,
+        .SYN = 0,
+        .RST = 1,
+        .PSH = 0,
+        .ACK = 0,
+        .URG = 0,
+    };
+
+    createGenericPacket(src_addr, dst_addr, seq_num, ack_seq, NULL, 0, packet, packet_len, flags);
+}

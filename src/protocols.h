@@ -110,4 +110,7 @@ void createDataPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_addr
 
 void createFinAckPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_addr, int32_t seq_num,
     int32_t ack_seq, uint8_t** packet, uint32_t* packet_len);
+
+void createRstPacket(struct sockaddr_in* src_addr, struct sockaddr_in* dst_addr, int32_t seq_num,
+    int32_t ack_seq, uint8_t** packet, uint32_t* packet_len);
 #endif

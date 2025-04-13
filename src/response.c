@@ -1,4 +1,3 @@
-#include "response.h"
 #include "log.h"
 #include "protocols.h"
 
@@ -123,6 +122,27 @@ void send_msg(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int seq
 
         free(packet);
     }
+
+    uint32_t packet_size;
+    uint8_t* packet;
+    createFinAckPacket(srcAddr, destAddr, seq_num + buf_length, ack_seq, &packet, &packet_size);
+
+    int sent
+        = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)destAddr, sizeof(*destAddr));
+
+    if (sent == -1) {
+        LOG_ERROR("Failed to send msg: %d\n", errno);
+    } else {
+        SENT_MSG("FIN", *srcAddr, *destAddr, (int)(seq_num + buf_length), ack_seq,
+            getTCPLength(packet, packet_size));
+    }
+
+    LOG_SEND({
+        LOG_INFO("Sent %d bytes\n", sent);
+        printIPPacket(packet, packet_size);
+    });
+
+    free(packet);
 }
 
 void send_file(struct sockaddr_in* srcAddr, struct sockaddr_in* destAddr, int seq_num, int ack_seq,

@@ -212,56 +212,7 @@ int main(int argc, char** argv)
                 continue;
             }
 
-            if (get_tcp_status(ip, port_number) == Finish) {
-                GENERAL("Port Finished: Sending RST\n");
-
-                uint8_t* packet;
-                uint32_t packet_size;
-
-                int new_seq_num = seq_num + 1;
-                createRstPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
-
-                int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
-                    sizeof(clientAddr));
-
-                if (sent == -1) {
-                    printf("Failed to send bytes: %s\n", strerror(errno));
-                } else {
-                    SENT_MSG("RST", addr, clientAddr, ack_seq, new_seq_num,
-                        getTCPLength(packet, packet_size));
-                }
-
-                LOG_SEND({
-                    LOG_INFO("Sent %d bytes. RST\n", sent);
-                    printIPPacket(packet, packet_size);
-                });
-
-                free(packet);
-                continue;
-            }
-
-            uint8_t* packet;
-            uint32_t packet_size;
-
             int new_seq_num = seq_num + 1;
-            createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
-
-            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
-                sizeof(clientAddr));
-
-            if (sent == -1) {
-                printf("Failed to send bytes\n");
-            } else {
-                SENT_MSG("ACK", addr, clientAddr, ack_seq, new_seq_num,
-                    getTCPLength(packet, packet_size));
-            }
-
-            LOG_SEND({
-                LOG_INFO("Sent %d bytes. ACK\n", sent);
-                printIPPacket(packet, packet_size);
-            });
-            free(packet);
-
             uint8_t* data;
             uint32_t data_size;
             getTCPDataPacket(buffer, packet_size, &data, &data_size);
@@ -275,7 +226,8 @@ int main(int argc, char** argv)
         case FIN: {
             RECV_MSG("FIN", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
 
-            if (get_tcp_status(ip, port_number) != Active) {
+            TCPConnection current_status = get_tcp_status(ip, port_number);
+            if (current_status != Active && current_status != Finish) {
                 GENERAL("Port not connected\n");
                 continue;
             }
@@ -284,27 +236,9 @@ int main(int argc, char** argv)
             uint32_t packet_size;
 
             int new_seq_num = seq_num + 1;
-            createAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
-
-            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
-                sizeof(clientAddr));
-
-            if (sent == -1) {
-                printf("Failed to send bytes\n");
-            } else {
-                SENT_MSG("ACK", addr, clientAddr, ack_seq, new_seq_num,
-                    getTCPLength(packet, packet_size));
-            }
-
-            LOG_SEND({
-                LOG_INFO("Sent %d bytes. ACK\n", sent);
-                printIPPacket(packet, packet_size);
-            });
-            free(packet);
-
             createFinAckPacket(&addr, &clientAddr, ack_seq, new_seq_num, &packet, &packet_size);
 
-            sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
+            int sent = sendto(serverFD, packet, packet_size, 0, (struct sockaddr*)&clientAddr,
                 sizeof(clientAddr));
 
             if (sent == -1) {
@@ -321,6 +255,7 @@ int main(int argc, char** argv)
 
             free(packet);
 
+            // change_tcp_connection(ip, port_number, Finish);
             end_connection(ip, port_number);
             GENERAL("Closed connection\n");
 
@@ -328,11 +263,6 @@ int main(int argc, char** argv)
         }
         case ACK:
             RECV_MSG("ACK", clientAddr, addr, seq_num, ack_seq, getTCPLength(buffer, packet_size));
-
-            if (get_tcp_status(ip, port_number) == Finish) {
-                // end_connection(ip, port_number); // Browser still sending requests after
-                // GENERAL("Closed connection\n");
-            }
 
             break;
         default:
